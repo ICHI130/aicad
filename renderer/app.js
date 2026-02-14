@@ -204,6 +204,9 @@ let isBoxSelecting = false;
 let middleDown = false;
 let middleDownTime = 0;
 
+// グリップ編集状態
+let gripState = null; // { shapeId, gripIndex } or null
+
 const history = [];
 let historyIndex = -1;
 const MAX_HISTORY = 50;
@@ -1017,6 +1020,11 @@ function fitView(targetShapes) {
 
 function redrawSnapMarker() {
   snapLayer.destroyChildren();
+  // グリップ描画（選択中の図形）
+  if (selectedId) {
+    const sel = shapes.find((s) => s.id === selectedId);
+    if (sel) drawGrips(sel);
+  }
   if (!latestSnap || latestSnap.type === 'grid') { snapLayer.draw(); return; }
   const p = mmToScreen(latestSnap, viewport);
   if (latestSnap.type === 'endpoint' || latestSnap.type === 'quadrant') {
@@ -1389,7 +1397,17 @@ stage.on('mousemove', () => {
     return;
   }
 
-  // 矩形選択ビジュアル更新
+  // グリップドラッグ
+  if (gripState) {
+    const shape = shapes.find((s) => s.id === gripState.shapeId);
+    if (shape) {
+      applyGripMove(shape, gripState.gripIndex, mm);
+      redraw();
+    }
+    return;
+  }
+
+  // 矩形選択ビジュアル更新（窓=青実線 / 交差=緑破線）
   if (isBoxSelecting && boxSelectStart) {
     const pos = stage.getPointerPosition();
     if (pos) {
@@ -1399,6 +1417,10 @@ stage.on('mousemove', () => {
         const y0 = Math.min(boxSelectStart.y, pos.y);
         const w = Math.abs(pos.x - boxSelectStart.x);
         const h = Math.abs(pos.y - boxSelectStart.y);
+        // 右→左ドラッグ = 交差選択（緑破線）
+        const isCrossing = pos.x < boxSelectStart.x;
+        selRect.style.border = isCrossing ? '1px dashed #00cc44' : '1px solid #4da6ff';
+        selRect.style.background = isCrossing ? 'rgba(0,204,68,0.05)' : 'rgba(77,166,255,0.06)';
         selRect.style.display = 'block';
         selRect.style.left = `${x0}px`;
         selRect.style.top = `${y0}px`;
@@ -1490,17 +1512,27 @@ stage.on('mousedown', (event) => {
   // ──── 各ツール処理 ────
 
   if (tool === Tool.SELECT) {
+    const pos = stage.getPointerPosition();
+
+    // グリップヒットテスト（図形選択中のみ）
+    const gripIdx = hitTestGrip(pos);
+    if (gripIdx !== null) {
+      gripState = { shapeId: selectedId, gripIndex: gripIdx };
+      redraw();
+      return;
+    }
+
     const hit = pickShape(mm);
     if (hit) {
       // 図形をクリック → 選択
       selectedId = hit.id;
+      selectedIds.clear();
       dragState = { id: hit.id, anchor: mm, original: shapeClone(hit) };
     } else {
       // 空白クリック → 矩形選択開始
       selectedId = null;
       selectedIds.clear();
       dragState = null;
-      const pos = stage.getPointerPosition();
       boxSelectStart = pos;
       isBoxSelecting = true;
     }
@@ -1872,6 +1904,14 @@ stage.on('mouseup', (event) => {
     return;
   }
   // 矩形選択終了
+  // グリップ確定
+  if (gripState) {
+    saveHistory();
+    gripState = null;
+    redraw();
+    return;
+  }
+
   if (isBoxSelecting) {
     const pos = stage.getPointerPosition();
     if (boxSelectStart && pos) {
@@ -1880,19 +1920,31 @@ stage.on('mouseup', (event) => {
       const rx1 = Math.max(boxSelectStart.x, pos.x);
       const ry1 = Math.max(boxSelectStart.y, pos.y);
       if (rx1 - rx0 > 4 || ry1 - ry0 > 4) {
-        // 矩形範囲内の図形を一括選択
+        // 右→左ドラッグ = 交差選択（触れたもの全て）
+        // 左→右ドラッグ = 窓選択（完全包含のみ）
+        const isCrossing = pos.x < boxSelectStart.x;
         selectedIds.clear();
         selectedId = null;
+        // mm座標に変換してから判定
+        const mm0 = screenToMm({ x: rx0, y: ry0 }, viewport);
+        const mm1 = screenToMm({ x: rx1, y: ry1 }, viewport);
+        const bx0 = Math.min(mm0.x, mm1.x), bx1 = Math.max(mm0.x, mm1.x);
+        const by0 = Math.min(mm0.y, mm1.y), by1 = Math.max(mm0.y, mm1.y);
         for (const s of shapes) {
-          if (isShapeInBox(s, rx0, ry0, rx1, ry1)) {
-            selectedIds.add(s.id);
+          if (!isLayerVisible(s) || isLayerLocked(s)) continue;
+          if (isCrossing) {
+            if (shapeTouchesBbox(s, bx0, by0, bx1, by1)) selectedIds.add(s.id);
+          } else {
+            if (isShapeInBox(s, rx0, ry0, rx1, ry1)) selectedIds.add(s.id);
           }
         }
         if (selectedIds.size === 1) {
           selectedId = [...selectedIds][0];
           selectedIds.clear();
         }
-        cmdline.addHistory(`${selectedIds.size + (selectedId ? 1 : 0)}個の図形を選択`, '#8aa8c0');
+        const count = selectedIds.size + (selectedId ? 1 : 0);
+        const mode = isCrossing ? '交差選択' : '窓選択';
+        cmdline.addHistory(`${mode}: ${count}個の図形を選択`, '#8aa8c0');
       }
     }
     isBoxSelecting = false;
@@ -1945,6 +1997,59 @@ stage.on('contextmenu', (event) => {
 
   // 選択ツール: コンテキストメニューを表示
   showContextMenu(event.evt.clientX, event.evt.clientY);
+});
+
+// ──────────────────────────────────────────────
+// テキストダブルクリック再編集
+// ──────────────────────────────────────────────
+stage.on('dblclick', () => {
+  if (tool !== Tool.SELECT) return;
+  const mm = pointerToMm();
+  const hit = pickShape(mm);
+  if (!hit || hit.type !== 'text') return;
+
+  const shape = hit;
+  const screen = mmToScreen({ x: shape.x, y: shape.y }, viewport);
+  if (textState.inputEl) { textState.inputEl.remove(); }
+
+  const el = document.createElement('input');
+  el.type = 'text';
+  el.value = shape.text || '';
+  el.style.position = 'absolute';
+  el.style.left = `${screen.x}px`;
+  el.style.top = `${screen.y - 20}px`;
+  el.style.background = 'rgba(0,0,0,0.85)';
+  el.style.color = '#ffff00';
+  el.style.border = '1px solid #ff8800';
+  el.style.borderRadius = '3px';
+  el.style.padding = '2px 6px';
+  el.style.fontSize = `${Math.max(12, (shape.height || 2.5) * viewport.scale)}px`;
+  el.style.fontFamily = 'monospace';
+  el.style.zIndex = '100';
+  el.style.minWidth = '80px';
+  container.appendChild(el);
+  el.focus();
+  el.select();
+  textState.inputEl = el;
+  statusbar.setCustomGuide('文字を編集 [Enter:確定] [Esc:キャンセル]');
+
+  el.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      const newText = el.value;
+      shape.text = newText;
+      saveHistory();
+      redraw();
+      cmdline.addHistory(`文字編集: "${newText}"`, '#4da6ff');
+      el.remove();
+      textState.inputEl = null;
+      changeTool(Tool.SELECT);
+    } else if (e.key === 'Escape') {
+      el.remove();
+      textState.inputEl = null;
+      changeTool(Tool.SELECT);
+    }
+    e.stopPropagation();
+  });
 });
 
 stage.on('wheel', (event) => {
@@ -2139,6 +2244,150 @@ async function openCadFile() {
     console.error('ファイル読み込みエラー', error);
     cmdline.addHistory(`エラー: ${error.message}`, '#ff6666');
   }
+}
+
+// ──────────────────────────────────────────────
+// グリップ編集ヘルパー
+// ──────────────────────────────────────────────
+function getGripPoints(shape) {
+  if (shape.type === 'line') return [
+    { x: shape.x1, y: shape.y1 },
+    { x: shape.x2, y: shape.y2 },
+    { x: (shape.x1 + shape.x2) / 2, y: (shape.y1 + shape.y2) / 2 },
+  ];
+  if (shape.type === 'circle') return [
+    { x: shape.cx, y: shape.cy },
+    { x: shape.cx + shape.r, y: shape.cy },
+    { x: shape.cx - shape.r, y: shape.cy },
+    { x: shape.cx, y: shape.cy + shape.r },
+    { x: shape.cx, y: shape.cy - shape.r },
+  ];
+  if (shape.type === 'arc') return [
+    { x: shape.cx, y: shape.cy },
+  ];
+  if (shape.type === 'rect') return [
+    { x: shape.x,              y: shape.y              },
+    { x: shape.x + shape.w,    y: shape.y              },
+    { x: shape.x + shape.w,    y: shape.y + shape.h    },
+    { x: shape.x,              y: shape.y + shape.h    },
+    { x: shape.x + shape.w / 2, y: shape.y + shape.h / 2 },
+  ];
+  return [];
+}
+
+function drawGrips(shape) {
+  const grips = getGripPoints(shape);
+  for (let i = 0; i < grips.length; i++) {
+    const sp = mmToScreen(grips[i], viewport);
+    const isActive = gripState?.shapeId === shape.id && gripState?.gripIndex === i;
+    snapLayer.add(new Konva.Rect({
+      x: sp.x - 4, y: sp.y - 4,
+      width: 8, height: 8,
+      fill: isActive ? '#ff4444' : '#0066ff',
+      stroke: '#ffffff',
+      strokeWidth: 1,
+    }));
+  }
+}
+
+function hitTestGrip(screenPt) {
+  if (!selectedId) return null;
+  const shape = shapes.find((s) => s.id === selectedId);
+  if (!shape) return null;
+  const grips = getGripPoints(shape);
+  for (let i = 0; i < grips.length; i++) {
+    const sp = mmToScreen(grips[i], viewport);
+    if (Math.hypot(screenPt.x - sp.x, screenPt.y - sp.y) < 8) return i;
+  }
+  return null;
+}
+
+function applyGripMove(shape, gripIndex, mm) {
+  if (shape.type === 'line') {
+    if (gripIndex === 0) { shape.x1 = mm.x; shape.y1 = mm.y; }
+    else if (gripIndex === 1) { shape.x2 = mm.x; shape.y2 = mm.y; }
+    else {
+      const cx = (shape.x1 + shape.x2) / 2, cy = (shape.y1 + shape.y2) / 2;
+      const dx = mm.x - cx, dy = mm.y - cy;
+      shape.x1 += dx; shape.y1 += dy; shape.x2 += dx; shape.y2 += dy;
+    }
+  } else if (shape.type === 'circle') {
+    if (gripIndex === 0) { shape.cx = mm.x; shape.cy = mm.y; }
+    else { shape.r = Math.max(0.1, Math.hypot(mm.x - shape.cx, mm.y - shape.cy)); }
+  } else if (shape.type === 'rect') {
+    if (gripIndex === 0) {
+      const x2 = shape.x + shape.w, y2 = shape.y + shape.h;
+      shape.x = mm.x; shape.y = mm.y;
+      shape.w = Math.max(0.1, x2 - mm.x); shape.h = Math.max(0.1, y2 - mm.y);
+    } else if (gripIndex === 1) {
+      const y2 = shape.y + shape.h;
+      shape.y = mm.y;
+      shape.w = Math.max(0.1, mm.x - shape.x); shape.h = Math.max(0.1, y2 - mm.y);
+    } else if (gripIndex === 2) {
+      shape.w = Math.max(0.1, mm.x - shape.x); shape.h = Math.max(0.1, mm.y - shape.y);
+    } else if (gripIndex === 3) {
+      const x2 = shape.x + shape.w;
+      shape.x = mm.x;
+      shape.w = Math.max(0.1, x2 - mm.x); shape.h = Math.max(0.1, mm.y - shape.y);
+    } else {
+      const dx = mm.x - (shape.x + shape.w / 2);
+      const dy = mm.y - (shape.y + shape.h / 2);
+      shape.x += dx; shape.y += dy;
+    }
+  }
+}
+
+// ──────────────────────────────────────────────
+// 交差選択ヘルパー（右→左ドラッグ）
+// ──────────────────────────────────────────────
+function shapeTouchesBbox(s, x0, y0, x1, y1) {
+  if (s.type === 'line') {
+    // 端点どちらかがbox内、またはboxの辺と交差
+    const inBox = (px, py) => px >= x0 && px <= x1 && py >= y0 && py <= y1;
+    if (inBox(s.x1, s.y1) || inBox(s.x2, s.y2)) return true;
+    // 簡易: lineとbbox辺が交差するか
+    const segs = [
+      [{ x: x0, y: y0 }, { x: x1, y: y0 }],
+      [{ x: x1, y: y0 }, { x: x1, y: y1 }],
+      [{ x: x1, y: y1 }, { x: x0, y: y1 }],
+      [{ x: x0, y: y1 }, { x: x0, y: y0 }],
+    ];
+    const line = { x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2 };
+    for (const [a, b] of segs) {
+      if (segmentsIntersect(line, { x1: a.x, y1: a.y, x2: b.x, y2: b.y })) return true;
+    }
+    return false;
+  }
+  if (s.type === 'rect') {
+    return !(s.x > x1 || s.x + s.w < x0 || s.y > y1 || s.y + s.h < y0);
+  }
+  if (s.type === 'circle' || s.type === 'arc') {
+    const clampedX = Math.max(x0, Math.min(x1, s.cx));
+    const clampedY = Math.max(y0, Math.min(y1, s.cy));
+    return Math.hypot(s.cx - clampedX, s.cy - clampedY) <= s.r;
+  }
+  if (s.type === 'text' || s.type === 'point') {
+    return s.x >= x0 && s.x <= x1 && s.y >= y0 && s.y <= y1;
+  }
+  if (s.type === 'hatch') {
+    if (s.hatchKind === 'circle') {
+      const clampedX = Math.max(x0, Math.min(x1, s.cx));
+      const clampedY = Math.max(y0, Math.min(y1, s.cy));
+      return Math.hypot(s.cx - clampedX, s.cy - clampedY) <= s.r;
+    }
+    return !(s.x > x1 || s.x + s.w < x0 || s.y > y1 || s.y + s.h < y0);
+  }
+  return false;
+}
+
+function segmentsIntersect(l1, l2) {
+  const d1x = l1.x2 - l1.x1, d1y = l1.y2 - l1.y1;
+  const d2x = l2.x2 - l2.x1, d2y = l2.y2 - l2.y1;
+  const cross = d1x * d2y - d1y * d2x;
+  if (Math.abs(cross) < 1e-10) return false;
+  const t = ((l2.x1 - l1.x1) * d2y - (l2.y1 - l1.y1) * d2x) / cross;
+  const u = ((l2.x1 - l1.x1) * d1y - (l2.y1 - l1.y1) * d1x) / cross;
+  return t >= 0 && t <= 1 && u >= 0 && u <= 1;
 }
 
 // ──────────────────────────────────────────────

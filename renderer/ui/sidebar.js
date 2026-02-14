@@ -35,6 +35,17 @@ function buildCheckbackPrompt() {
 }
 
 export function initSidebar({ getDrawingContext, onAiResponse }) {
+  // ── タブ切り替え ──
+  const tabButtons = document.querySelectorAll('.sidebar-tab');
+  const tabContents = document.querySelectorAll('.sidebar-tab-content');
+  for (const btn of tabButtons) {
+    btn.addEventListener('click', () => {
+      const target = btn.dataset.tab;
+      for (const b of tabButtons) b.classList.toggle('active', b.dataset.tab === target);
+      for (const c of tabContents) c.classList.toggle('active', c.id === `sidebar-tab-${target}`);
+    });
+  }
+
   const provider = document.getElementById('provider');
   const chatInput = document.getElementById('chat-input');
   const imageInput = document.getElementById('image-ref-input');

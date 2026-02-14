@@ -156,6 +156,79 @@
         overflow: hidden;
       }
 
+      /* サイドバー タブ */
+      .sidebar-tabs {
+        display: flex;
+        border-bottom: 1px solid #2b2f33;
+        background: #0d1117;
+        flex-shrink: 0;
+      }
+      .sidebar-tab {
+        flex: 1;
+        padding: 7px 4px;
+        background: none;
+        border: none;
+        border-bottom: 2px solid transparent;
+        color: #6a7480;
+        font-size: 11px;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .sidebar-tab:hover { color: #c0d0e0; }
+      .sidebar-tab.active { color: #4da6ff; border-bottom-color: #4da6ff; }
+
+      .sidebar-tab-content { display: none; flex-direction: column; flex: 1; overflow: hidden; }
+      .sidebar-tab-content.active { display: flex; }
+
+      /* 設定タブ */
+      .settings-section {
+        padding: 10px 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        overflow-y: auto;
+        flex: 1;
+      }
+      .settings-title {
+        font-size: 12px;
+        color: #9ecbff;
+        font-weight: bold;
+        margin-bottom: 4px;
+      }
+      .settings-note {
+        font-size: 10px;
+        color: #556070;
+        margin-bottom: 6px;
+      }
+      .settings-label {
+        font-size: 11px;
+        color: #8aa8c0;
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+      }
+      .settings-label input {
+        background: #0b0d10;
+        border: 1px solid #3a4450;
+        color: #e8e8e8;
+        border-radius: 3px;
+        padding: 4px 6px;
+        font-size: 11px;
+        font-family: monospace;
+      }
+      .settings-save-btn {
+        align-self: flex-end;
+        background: #1e3a5f;
+        border: 1px solid #2a5080;
+        color: #7abfff;
+        border-radius: 3px;
+        padding: 3px 10px;
+        font-size: 11px;
+        cursor: pointer;
+        margin-bottom: 8px;
+      }
+      .settings-save-btn:hover { background: #254870; }
+
       /* サイドバー（AI チャット）*/
 
       #property-panel {
@@ -440,44 +513,66 @@
       <!-- サイドバー -->
       <aside class="sidebar">
         <div id="property-panel"></div>
-        <h2>🤖 AIチャット</h2>
-        <div class="chat-log" id="chat-log"></div>
-        <div class="chat-controls">
-          <label>プロバイダ
-            <select id="provider">
-              <option value="ollama">Ollama (localhost:11434)</option>
-              <option value="claude">Claude API</option>
-              <option value="openai">ChatGPT (OpenAI API)</option>
-              <option value="gemini">Gemini API</option>
-            </select>
-          </label>
-          <label>Claude API Key
-            <input id="claude-api-key" type="password" placeholder="sk-ant-..." />
-          </label>
-          <button id="save-claude-api-key">Claude APIキー保存</button>
 
-          <label>OpenAI API Key
-            <input id="openai-api-key" type="password" placeholder="sk-proj-..." />
-          </label>
-          <button id="save-openai-api-key">OpenAI APIキー保存</button>
+        <!-- タブ切り替え -->
+        <div class="sidebar-tabs">
+          <button class="sidebar-tab active" data-tab="chat">🤖 AIチャット</button>
+          <button class="sidebar-tab" data-tab="settings">⚙ 設定</button>
+        </div>
 
-          <label>Gemini API Key
-            <input id="gemini-api-key" type="password" placeholder="AIza..." />
-          </label>
-          <button id="save-gemini-api-key">Gemini APIキー保存</button>
+        <!-- チャットタブ -->
+        <div id="sidebar-tab-chat" class="sidebar-tab-content active">
+          <div class="chat-log" id="chat-log"></div>
+          <div class="chat-controls">
+            <label>プロバイダ
+              <select id="provider">
+                <option value="ollama">Ollama (localhost:11434)</option>
+                <option value="claude">Claude API</option>
+                <option value="openai">ChatGPT (OpenAI API)</option>
+                <option value="gemini">Gemini API</option>
+              </select>
+            </label>
 
-          <div class="image-ref-box">
-            <div id="image-ref-meta">チェックバック資料: なし</div>
-            <img id="image-ref-preview" alt="reference preview" />
-            <input id="image-ref-input" type="file" accept="image/*,.pdf,application/pdf" />
-            <div class="image-ref-actions">
-              <button id="image-ref-clear" type="button">資料クリア</button>
-              <button id="apply-checkback" type="button">チェックバック反映(β)</button>
+            <div class="image-ref-box">
+              <div id="image-ref-meta">チェックバック資料: なし</div>
+              <img id="image-ref-preview" alt="reference preview" />
+              <input id="image-ref-input" type="file" accept="image/*,.pdf,application/pdf" />
+              <div class="image-ref-actions">
+                <button id="image-ref-clear" type="button">資料クリア</button>
+                <button id="apply-checkback" type="button">チェックバック反映(β)</button>
+              </div>
             </div>
-          </div>
 
-          <textarea id="chat-input" rows="3" placeholder="「現調写真から間取りを簡易作図して」や「このチェックバックを反映して」など"></textarea>
-          <button id="send-chat">送信 [Ctrl+Enter]</button>
+            <textarea id="chat-input" rows="3" placeholder="「現調写真から間取りを簡易作図して」や「このチェックバックを反映して」など"></textarea>
+            <button id="send-chat">送信 [Ctrl+Enter]</button>
+          </div>
+        </div>
+
+        <!-- 設定タブ -->
+        <div id="sidebar-tab-settings" class="sidebar-tab-content">
+          <div class="settings-section">
+            <div class="settings-title">🔑 APIキー設定</div>
+            <div class="settings-note">キーはローカルに保存されます。外部には送信されません。</div>
+
+            <label class="settings-label">Claude API Key
+              <input id="claude-api-key" type="password" placeholder="sk-ant-..." autocomplete="off" />
+            </label>
+            <button id="save-claude-api-key" class="settings-save-btn">保存</button>
+
+            <label class="settings-label">OpenAI API Key
+              <input id="openai-api-key" type="password" placeholder="sk-proj-..." autocomplete="off" />
+            </label>
+            <button id="save-openai-api-key" class="settings-save-btn">保存</button>
+
+            <label class="settings-label">Gemini API Key
+              <input id="gemini-api-key" type="password" placeholder="AIza..." autocomplete="off" />
+            </label>
+            <button id="save-gemini-api-key" class="settings-save-btn">保存</button>
+
+            <label class="settings-label">Ollama ホスト
+              <input id="ollama-host" type="text" placeholder="http://localhost:11434" autocomplete="off" />
+            </label>
+          </div>
         </div>
       </aside>
 
