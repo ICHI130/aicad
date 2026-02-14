@@ -26,6 +26,8 @@ npm start
 
 機能差分の整理と実装優先度は `docs/autocad-textbook-integration-plan.md` にまとめています。
 
+P3〜P5の実装バックログは `docs/po3-po5-textbook-backlog.md` を参照してください。
+
 ## 開発状況
 
 Phase 1 開発中（基本描画・AI連携）
