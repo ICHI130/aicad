@@ -7,6 +7,8 @@ import { initToolbar } from './ui/toolbar.js';
 import { initStatusbar } from './ui/statusbar.js';
 import { initSidebar } from './ui/sidebar.js';
 import { initCommandLine } from './ui/commandline.js';
+import { parseAiDrawCommand } from './ai/commandSchema.js';
+import { buildPreviewShape } from './cad/interaction.js';
 
 // ──────────────────────────────────────────────
 // DXF デコード（CP932 対応）
@@ -119,6 +121,7 @@ let copyState = null;
 let rotateState = null;
 let dimState = { p1: null, p2: null };
 let latestSnap = { x: 0, y: 0, type: 'grid' };
+let lastNonSelectTool = Tool.LINE;
 
 // オフセット状態
 let offsetState = { dist: null, base: null };
@@ -185,6 +188,7 @@ saveHistory();
 // ツール切替
 // ──────────────────────────────────────────────
 function changeTool(nextTool) {
+  if (nextTool && nextTool !== Tool.SELECT) lastNonSelectTool = nextTool;
   // テキスト入力中のインプットを削除
   if (textState.inputEl) {
     textState.inputEl.remove();
@@ -270,9 +274,9 @@ initSidebar({
     });
     return { layers: [{ name: 'default', visible: true }], elements, selected: selectedId ? [selectedId] : [], bbox: computeBoundingBox(elements) };
   },
-  onAiResponse(text) {
+  onAiResponse(result) {
     // AI応答からJSON描画指示を抽出
-    executeAiDraw(text);
+    executeAiDraw(result?.text || '');
   },
 });
 
@@ -280,21 +284,21 @@ initSidebar({
 // AI自動作図
 // ──────────────────────────────────────────────
 function executeAiDraw(text) {
-  const match = text.match(/```json\s*([\s\S]*?)```/);
-  if (!match) return;
-  try {
-    const parsed = JSON.parse(match[1]);
-    if (parsed.action !== 'draw' || !Array.isArray(parsed.shapes)) return;
-    for (const s of parsed.shapes) {
-      shapes.push({ id: `shape_${crypto.randomUUID()}`, ...s });
+  const parsed = parseAiDrawCommand(text);
+  if (!parsed.ok) {
+    if (!/no valid JSON payload found/.test(parsed.reason)) {
+      cmdline.addHistory(`AIコマンド無効: ${parsed.reason}`, '#ff6666');
     }
-    saveHistory();
-    fitView();
-    redraw();
-    cmdline.addHistory(`AI作図: ${parsed.shapes.length}個の図形を追加`, '#4da6ff');
-  } catch (e) {
-    console.error('AI draw parse error', e);
+    return;
   }
+
+  for (const s of parsed.command.shapes) {
+    shapes.push({ id: `shape_${crypto.randomUUID()}`, ...s });
+  }
+  saveHistory();
+  fitView();
+  redraw();
+  cmdline.addHistory(`AI作図: ${parsed.command.shapes.length}個の図形を追加`, '#4da6ff');
 }
 
 // ──────────────────────────────────────────────
@@ -550,6 +554,9 @@ function redrawSnapMarker() {
     snapLayer.add(new Konva.Rect({ x: p.x - 4, y: p.y - 4, width: 8, height: 8, stroke: '#00ff66', strokeWidth: 1 }));
   } else if (latestSnap.type === 'midpoint') {
     snapLayer.add(new Konva.Line({ points: [p.x, p.y - 5, p.x - 5, p.y + 4, p.x + 5, p.y + 4, p.x, p.y - 5], stroke: '#ffdd33', strokeWidth: 1, closed: true }));
+  } else if (latestSnap.type === 'intersection') {
+    snapLayer.add(new Konva.Line({ points: [p.x - 5, p.y - 5, p.x + 5, p.y + 5], stroke: '#66ccff', strokeWidth: 1 }));
+    snapLayer.add(new Konva.Line({ points: [p.x + 5, p.y - 5, p.x - 5, p.y + 5], stroke: '#66ccff', strokeWidth: 1 }));
   }
   snapLayer.draw();
 }
@@ -816,7 +823,7 @@ function exportCurrentDxf() {
 // ──────────────────────────────────────────────
 stage.on('mousemove', () => {
   let mm = getSnap();
-  statusbar.updateCursor(mm);
+  statusbar.updateCursor(mm, latestSnap?.type || 'grid', snapMode);
 
   if (isPanning && panStart) {
     const now = stage.getPointerPosition();
@@ -853,20 +860,16 @@ stage.on('mousemove', () => {
     || (moveState?.base) || (copyState?.base);
   if (orthoMode && orthoRef) mm = applyOrtho(orthoRef, mm);
 
-  if (tool === Tool.LINE && drawingStart) {
-    previewShape = { type: 'line', x1: drawingStart.x, y1: drawingStart.y, x2: mm.x, y2: mm.y };
-  } else if (tool === Tool.RECT && drawingStart) {
-    const rect = normalizeRect(drawingStart, mm);
-    previewShape = rect.w > 0 && rect.h > 0 ? { type: 'rect', ...rect } : null;
-  } else if (tool === Tool.CIRCLE && drawingStart) {
-    previewShape = { type: 'circle', cx: drawingStart.x, cy: drawingStart.y, r: Math.hypot(mm.x - drawingStart.x, mm.y - drawingStart.y) };
-  } else if (tool === Tool.POLYLINE && polylinePoints.length) {
-    previewShape = { type: 'polyline_preview', points: [...polylinePoints, mm] };
-  } else if (tool === Tool.DIM && dimState.p1 && dimState.p2) {
-    const dir = Math.abs(dimState.p2.x - dimState.p1.x) > Math.abs(dimState.p2.y - dimState.p1.y) ? 'h' : 'v';
-    const offset = dir === 'h' ? mm.y - dimState.p1.y : mm.x - dimState.p1.x;
-    previewShape = { type: 'dim', x1: dimState.p1.x, y1: dimState.p1.y, x2: dimState.p2.x, y2: dimState.p2.y, offset, dir };
-  } else if (dragState) {
+  previewShape = buildPreviewShape({
+    tool,
+    drawingStart,
+    point: mm,
+    polylinePoints,
+    dimState,
+    normalizeRect,
+  });
+
+  if (dragState) {
     const dx = mm.x - dragState.anchor.x, dy = mm.y - dragState.anchor.y;
     const target = shapes.find((s) => s.id === dragState.id);
     if (target) { Object.assign(target, shapeClone(dragState.original)); applyMove(target, dx, dy); }
@@ -1307,6 +1310,23 @@ document.addEventListener('keydown', (event) => {
 
   if (inInput) return; // テキスト入力中はここ以降スキップ
 
+  // Space/Enter: 直前コマンドの再実行（AutoCAD風）
+  if ((key === ' ' || key === 'Enter') && tool === Tool.SELECT) {
+    event.preventDefault();
+    if (lastNonSelectTool && lastNonSelectTool !== Tool.SELECT) {
+      changeTool(lastNonSelectTool);
+      cmdline.addHistory(`直前コマンド再実行: ${lastNonSelectTool.toUpperCase()}`, '#8aa8c0');
+    }
+    return;
+  }
+
+  // Shift押下中は一時的にオルソON（AutoCAD風の補助）
+  if (key === 'Shift' && !orthoMode) {
+    orthoMode = statusbar.toggleOrtho(true);
+    document._tempOrthoByShift = true;
+    return;
+  }
+
   // Escape
   if (key === 'Escape') { escapeCurrentTool(); return; }
 
@@ -1348,6 +1368,14 @@ document.addEventListener('keydown', (event) => {
   // ZA: 全体表示
   if (document._lastKey === 'z' && lKey === 'a') { fitView(); document._lastKey = ''; return; }
   document._lastKey = lKey;
+});
+
+
+document.addEventListener('keyup', (event) => {
+  if (event.key === 'Shift' && document._tempOrthoByShift) {
+    orthoMode = statusbar.toggleOrtho(false);
+    document._tempOrthoByShift = false;
+  }
 });
 
 // ──────────────────────────────────────────────

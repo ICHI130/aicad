@@ -250,17 +250,38 @@ export function dxfEntitiesToShapes(entities) {
 
 export function exportDxf(shapes) {
   const lines = ['0', 'SECTION', '2', 'ENTITIES'];
+
   for (const s of shapes) {
     if (s.type === 'line') {
-      lines.push('0','LINE','8','0','10',String(s.x1),'20',String(s.y1),'30','0','11',String(s.x2),'21',String(s.y2),'31','0');
+      lines.push('0', 'LINE', '8', '0', '10', String(s.x1), '20', String(s.y1), '30', '0', '11', String(s.x2), '21', String(s.y2), '31', '0');
     } else if (s.type === 'circle') {
-      lines.push('0','CIRCLE','8','0','10',String(s.cx),'20',String(s.cy),'30','0','40',String(s.r));
+      lines.push('0', 'CIRCLE', '8', '0', '10', String(s.cx), '20', String(s.cy), '30', '0', '40', String(s.r));
     } else if (s.type === 'arc') {
-      lines.push('0','ARC','8','0','10',String(s.cx),'20',String(s.cy),'30','0','40',String(s.r),'50',String(s.startAngle || 0),'51',String(s.endAngle || 0));
+      lines.push('0', 'ARC', '8', '0', '10', String(s.cx), '20', String(s.cy), '30', '0', '40', String(s.r), '50', String(s.startAngle || 0), '51', String(s.endAngle || 0));
     } else if (s.type === 'text') {
-      lines.push('0','TEXT','8','0','10',String(s.x),'20',String(s.y),'30','0','40',String(s.height || 2.5),'1',String(s.text || ''));
+      lines.push('0', 'TEXT', '8', '0', '10', String(s.x), '20', String(s.y), '30', '0', '40', String(s.height || 2.5), '50', String(s.rotation || 0), '72', String(s.align || 0), '1', String(s.text || ''));
+    } else if (s.type === 'point') {
+      lines.push('0', 'POINT', '8', '0', '10', String(s.x), '20', String(s.y), '30', '0');
+    } else if (s.type === 'rect') {
+      const x1 = s.x;
+      const y1 = s.y;
+      const x2 = s.x + s.w;
+      const y2 = s.y + s.h;
+      lines.push('0', 'LINE', '8', '0', '10', String(x1), '20', String(y1), '30', '0', '11', String(x2), '21', String(y1), '31', '0');
+      lines.push('0', 'LINE', '8', '0', '10', String(x2), '20', String(y1), '30', '0', '11', String(x2), '21', String(y2), '31', '0');
+      lines.push('0', 'LINE', '8', '0', '10', String(x2), '20', String(y2), '30', '0', '11', String(x1), '21', String(y2), '31', '0');
+      lines.push('0', 'LINE', '8', '0', '10', String(x1), '20', String(y2), '30', '0', '11', String(x1), '21', String(y1), '31', '0');
+    } else if (s.type === 'dim') {
+      // R12互換優先: 寸法はLINE+TEXTに分解
+      lines.push('0', 'LINE', '8', '0', '10', String(s.x1), '20', String(s.y1), '30', '0', '11', String(s.x2), '21', String(s.y2), '31', '0');
+      const mx = (s.x1 + s.x2) / 2;
+      const my = (s.y1 + s.y2) / 2;
+      const dist = Math.hypot(s.x2 - s.x1, s.y2 - s.y1);
+      lines.push('0', 'TEXT', '8', '0', '10', String(mx), '20', String(my), '30', '0', '40', '2.5', '1', `${Math.round(dist)} mm`);
     }
   }
-  lines.push('0','ENDSEC','0','EOF');
+
+  lines.push('0', 'ENDSEC', '0', 'EOF');
   return lines.join('\n');
 }
+

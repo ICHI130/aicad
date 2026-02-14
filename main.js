@@ -3,6 +3,8 @@ const path = require('path');
 const fs = require('fs/promises');
 
 let claudeApiKey = '';
+let openAiApiKey = '';
+let geminiApiKey = '';
 
 function createMenu() {
   const template = [
@@ -86,8 +88,19 @@ ipcMain.handle('ai:set-claude-api-key', (_event, apiKey) => {
   return { ok: true, configured: Boolean(claudeApiKey) };
 });
 
+
+ipcMain.handle('ai:set-openai-api-key', (_event, apiKey) => {
+  openAiApiKey = typeof apiKey === 'string' ? apiKey.trim() : '';
+  return { ok: true, configured: Boolean(openAiApiKey) };
+});
+
+ipcMain.handle('ai:set-gemini-api-key', (_event, apiKey) => {
+  geminiApiKey = typeof apiKey === 'string' ? apiKey.trim() : '';
+  return { ok: true, configured: Boolean(geminiApiKey) };
+});
+
 ipcMain.handle('ai:ask', async (_event, payload) => {
-  const { provider, message, drawing } = payload ?? {};
+  const { provider, message, drawing, referenceImage } = payload ?? {};
 
   if (!message || typeof message !== 'string') {
     throw new Error('メッセージが空です。');
@@ -100,7 +113,11 @@ ipcMain.handle('ai:ask', async (_event, payload) => {
       body: JSON.stringify({
         model: 'llama3.1:8b',
         stream: false,
-        prompt: JSON.stringify({ drawing, message }),
+        prompt: JSON.stringify({
+          drawing,
+          message,
+          imageReference: referenceImage ? { name: referenceImage.name, mimeType: referenceImage.mimeType } : null,
+        }),
       }),
     });
 
@@ -109,7 +126,10 @@ ipcMain.handle('ai:ask', async (_event, payload) => {
     }
 
     const data = await response.json();
-    return { provider, text: data.response || '(応答なし)' };
+    const addon = referenceImage
+      ? '\n\n[補足] Ollamaは現在テキストモデルで実行中のため、画像はメタ情報のみ参照しています。'
+      : '';
+    return { provider, type: 'text', text: (data.response || '(応答なし)') + addon };
   }
 
   if (provider === 'claude') {
@@ -130,7 +150,27 @@ ipcMain.handle('ai:ask', async (_event, payload) => {
         messages: [
           {
             role: 'user',
-            content: `図面コンテキスト: ${JSON.stringify(drawing)}\n\n質問: ${message}`,
+            content: referenceImage?.dataBase64
+              ? [
+                  {
+                    type: 'image',
+                    source: {
+                      type: 'base64',
+                      media_type: referenceImage.mimeType || 'image/jpeg',
+                      data: referenceImage.dataBase64,
+                    },
+                  },
+                  {
+                    type: 'text',
+                    text: `図面コンテキスト: ${JSON.stringify(drawing)}\n\n質問: ${message}\n\n添付画像を現調写真として参照し、簡易作図できるJSON案があれば \`\`\`json ブロックで返してください。`,
+                  },
+                ]
+              : [
+                  {
+                    type: 'text',
+                    text: `図面コンテキスト: ${JSON.stringify(drawing)}\n\n質問: ${message}`,
+                  },
+                ],
           },
         ],
       }),
@@ -143,7 +183,72 @@ ipcMain.handle('ai:ask', async (_event, payload) => {
 
     const data = await response.json();
     const text = data.content?.map((item) => item.text).join('\n') || '(応答なし)';
-    return { provider, text };
+    return { provider, type: 'text', text };
+  }
+
+
+  if (provider === 'openai') {
+    if (!openAiApiKey) {
+      throw new Error('OpenAI APIキーが未設定です。');
+    }
+
+    const content = [];
+    if (referenceImage?.dataBase64) {
+      content.push({ type: 'input_image', image_url: `data:${referenceImage.mimeType || 'image/jpeg'};base64,${referenceImage.dataBase64}` });
+    }
+    content.push({
+      type: 'input_text',
+      text: `図面コンテキスト: ${JSON.stringify(drawing)}\n\n質問: ${message}`,
+    });
+
+    const response = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${openAiApiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4.1-mini',
+        input: [{ role: 'user', content }],
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`OpenAI接続エラー: ${response.status} ${errorText}`);
+    }
+
+    const data = await response.json();
+    const text = data.output_text
+      || data.output?.flatMap((item) => item.content || []).map((c) => c.text).filter(Boolean).join('\n')
+      || '(応答なし)';
+    return { provider, type: 'text', text };
+  }
+
+  if (provider === 'gemini') {
+    if (!geminiApiKey) {
+      throw new Error('Gemini APIキーが未設定です。');
+    }
+
+    const parts = [{ text: `図面コンテキスト: ${JSON.stringify(drawing)}\n\n質問: ${message}` }];
+    if (referenceImage?.dataBase64) {
+      parts.unshift({ inline_data: { mime_type: referenceImage.mimeType || 'image/jpeg', data: referenceImage.dataBase64 } });
+    }
+
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ role: 'user', parts }] }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Gemini接続エラー: ${response.status} ${errorText}`);
+    }
+
+    const data = await response.json();
+    const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text).filter(Boolean).join('\n') || '(応答なし)';
+    return { provider, type: 'text', text };
   }
 
   throw new Error('未対応のプロバイダです。');
