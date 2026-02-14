@@ -205,6 +205,55 @@
         font-size: 11px;
       }
       .mode-btn.on { color: #4da6ff; border-color: #4da6ff; }
+
+      /* コンテキストメニュー */
+      #ctx-menu {
+        position: fixed;
+        background: #1a2028;
+        border: 1px solid #3a4450;
+        border-radius: 4px;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.6);
+        z-index: 1000;
+        min-width: 160px;
+        padding: 4px 0;
+        display: none;
+        font-size: 12px;
+      }
+      #ctx-menu.visible { display: block; }
+      .ctx-item {
+        padding: 6px 16px;
+        cursor: pointer;
+        color: #e8e8e8;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        white-space: nowrap;
+      }
+      .ctx-item:hover { background: #2554a8; }
+      .ctx-item.disabled { color: #4a5560; cursor: default; }
+      .ctx-item.disabled:hover { background: transparent; }
+      .ctx-sep {
+        height: 1px;
+        background: #2b2f33;
+        margin: 3px 0;
+      }
+      .ctx-key {
+        margin-left: auto;
+        color: #5a6878;
+        font-size: 10px;
+        font-family: monospace;
+      }
+      .ctx-item.disabled .ctx-key { color: #3a4450; }
+
+      /* 矩形選択プレビュー */
+      #select-rect {
+        position: absolute;
+        border: 1px solid #4da6ff;
+        background: rgba(77, 166, 255, 0.06);
+        pointer-events: none;
+        display: none;
+        z-index: 10;
+      }
     </style>
   </head>
   <body>
@@ -213,7 +262,26 @@
       <div id="tool-panel"></div>
 
       <!-- CADキャンバス -->
-      <div id="cad-root"></div>
+      <div id="cad-root">
+        <div id="select-rect"></div>
+      </div>
+
+      <!-- コンテキストメニュー -->
+      <div id="ctx-menu">
+        <div class="ctx-item" data-action="select-all"><span>🔲</span>すべて選択<span class="ctx-key">Ctrl+A</span></div>
+        <div class="ctx-sep"></div>
+        <div class="ctx-item" data-action="copy"><span>⊕</span>コピー<span class="ctx-key">Ctrl+C</span></div>
+        <div class="ctx-item" data-action="paste"><span>📋</span>貼り付け<span class="ctx-key">Ctrl+V</span></div>
+        <div class="ctx-item" data-action="delete"><span>🗑</span>削除<span class="ctx-key">Del</span></div>
+        <div class="ctx-sep"></div>
+        <div class="ctx-item" data-action="move"><span>↔</span>移動<span class="ctx-key">M</span></div>
+        <div class="ctx-item" data-action="rotate"><span>↻</span>回転<span class="ctx-key">RO</span></div>
+        <div class="ctx-item" data-action="mirror"><span>⇌</span>鏡像<span class="ctx-key">MI</span></div>
+        <div class="ctx-item" data-action="offset"><span>∥</span>オフセット<span class="ctx-key">O</span></div>
+        <div class="ctx-sep"></div>
+        <div class="ctx-item" data-action="fit"><span>⊡</span>全体表示<span class="ctx-key">ZA</span></div>
+        <div class="ctx-item" data-action="undo"><span>↩</span>元に戻す<span class="ctx-key">Ctrl+Z</span></div>
+      </div>
 
       <!-- サイドバー -->
       <aside class="sidebar">

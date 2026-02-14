@@ -135,6 +135,14 @@ let orthoMode = false;
 let snapMode = true;
 let gridVisible = true;
 
+// 矩形選択状態
+let boxSelectStart = null; // スクリーン座標
+let isBoxSelecting = false;
+
+// ホイール中ボタンパン状態（安定版）
+let middleDown = false;
+let middleDownTime = 0;
+
 const history = [];
 let historyIndex = -1;
 const MAX_HISTORY = 50;
@@ -820,6 +828,26 @@ stage.on('mousemove', () => {
     return;
   }
 
+  // 矩形選択ビジュアル更新
+  if (isBoxSelecting && boxSelectStart) {
+    const pos = stage.getPointerPosition();
+    if (pos) {
+      const selRect = document.getElementById('select-rect');
+      if (selRect) {
+        const x0 = Math.min(boxSelectStart.x, pos.x);
+        const y0 = Math.min(boxSelectStart.y, pos.y);
+        const w = Math.abs(pos.x - boxSelectStart.x);
+        const h = Math.abs(pos.y - boxSelectStart.y);
+        selRect.style.display = 'block';
+        selRect.style.left = `${x0}px`;
+        selRect.style.top = `${y0}px`;
+        selRect.style.width = `${w}px`;
+        selRect.style.height = `${h}px`;
+      }
+    }
+    return;
+  }
+
   // オルソ適用
   const orthoRef = drawingStart || (polylinePoints.length ? polylinePoints[polylinePoints.length - 1] : null)
     || (moveState?.base) || (copyState?.base);
@@ -867,11 +895,20 @@ stage.on('mousemove', () => {
 });
 
 stage.on('mousedown', (event) => {
+  // ──── ホイール中ボタン（パン / ダブルクリックで全体表示） ────
   if (event.evt.button === 1) {
+    event.evt.preventDefault();
     const now = Date.now();
-    if (!stage._lastMiddleTime || now - stage._lastMiddleTime < 400) {
-      if (stage._lastMiddleTime && now - stage._lastMiddleTime < 400) { fitView(); stage._lastMiddleTime = 0; }
-      else { stage._lastMiddleTime = now; isPanning = true; panStart = stage.getPointerPosition(); }
+    if (now - middleDownTime < 300) {
+      // ダブルクリック → 全体表示
+      fitView();
+      middleDownTime = 0;
+      middleDown = false;
+    } else {
+      middleDown = true;
+      middleDownTime = now;
+      isPanning = true;
+      panStart = stage.getPointerPosition();
     }
     return;
   }
@@ -885,9 +922,19 @@ stage.on('mousedown', (event) => {
 
   if (tool === Tool.SELECT) {
     const hit = pickShape(mm);
-    selectedId = hit?.id || null;
-    selectedIds.clear();
-    dragState = hit ? { id: hit.id, anchor: mm, original: shapeClone(hit) } : null;
+    if (hit) {
+      // 図形をクリック → 選択
+      selectedId = hit.id;
+      dragState = { id: hit.id, anchor: mm, original: shapeClone(hit) };
+    } else {
+      // 空白クリック → 矩形選択開始
+      selectedId = null;
+      selectedIds.clear();
+      dragState = null;
+      const pos = stage.getPointerPosition();
+      boxSelectStart = pos;
+      isBoxSelecting = true;
+    }
     statusbar.setGuide(tool, 0);
     redraw();
     return;
@@ -1129,7 +1176,44 @@ stage.on('mousedown', (event) => {
 });
 
 stage.on('mouseup', (event) => {
-  if (event.evt.button === 1) { isPanning = false; panStart = null; return; }
+  if (event.evt.button === 1) {
+    middleDown = false;
+    isPanning = false;
+    panStart = null;
+    return;
+  }
+  // 矩形選択終了
+  if (isBoxSelecting) {
+    const pos = stage.getPointerPosition();
+    if (boxSelectStart && pos) {
+      const rx0 = Math.min(boxSelectStart.x, pos.x);
+      const ry0 = Math.min(boxSelectStart.y, pos.y);
+      const rx1 = Math.max(boxSelectStart.x, pos.x);
+      const ry1 = Math.max(boxSelectStart.y, pos.y);
+      if (rx1 - rx0 > 4 || ry1 - ry0 > 4) {
+        // 矩形範囲内の図形を一括選択
+        selectedIds.clear();
+        selectedId = null;
+        for (const s of shapes) {
+          if (isShapeInBox(s, rx0, ry0, rx1, ry1)) {
+            selectedIds.add(s.id);
+          }
+        }
+        if (selectedIds.size === 1) {
+          selectedId = [...selectedIds][0];
+          selectedIds.clear();
+        }
+        cmdline.addHistory(`${selectedIds.size + (selectedId ? 1 : 0)}個の図形を選択`, '#8aa8c0');
+      }
+    }
+    isBoxSelecting = false;
+    boxSelectStart = null;
+    const selRect = document.getElementById('select-rect');
+    if (selRect) selRect.style.display = 'none';
+    redraw();
+    return;
+  }
+
   if (tool === Tool.RECT && drawingStart) {
     let mm = getSnap();
     if (orthoMode) mm = applyOrtho(drawingStart, mm);
@@ -1148,19 +1232,26 @@ stage.on('mouseup', (event) => {
 
 stage.on('contextmenu', (event) => {
   event.evt.preventDefault();
-  if (tool === Tool.POLYLINE) finishPolyline(false);
-  else if (tool === Tool.LINE) {
+
+  // 作図中は右クリックでキャンセル/確定
+  if (tool === Tool.POLYLINE) { finishPolyline(false); return; }
+  if (tool === Tool.LINE) {
+    // 線作図中: 右クリックで終了（AutoCAD準拠）
     drawingStart = null; previewShape = null;
-    changeTool(Tool.SELECT);
-  } else if (tool === Tool.COPY) {
+    changeTool(Tool.SELECT); return;
+  }
+  if (tool === Tool.COPY) {
     if (copyState?.preview) {
       const idx = shapes.findIndex((s) => s.id === copyState.preview.id);
       if (idx !== -1) shapes.splice(idx, 1);
       copyState.preview = null;
     }
     copyState = null;
-    changeTool(Tool.SELECT);
+    changeTool(Tool.SELECT); return;
   }
+
+  // 選択ツール: コンテキストメニューを表示
+  showContextMenu(event.evt.clientX, event.evt.clientY);
 });
 
 stage.on('wheel', (event) => {
@@ -1199,6 +1290,15 @@ document.addEventListener('keydown', (event) => {
       shapes.push(pasted);
       selectedId = pasted.id;
       saveHistory();
+      redraw();
+      return;
+    }
+    if (lKey === 'a') {
+      event.preventDefault();
+      selectedIds.clear();
+      for (const s of shapes) selectedIds.add(s.id);
+      selectedId = null;
+      cmdline.addHistory(`すべて選択: ${shapes.length}個`, '#8aa8c0');
       redraw();
       return;
     }
@@ -1292,6 +1392,114 @@ async function openCadFile() {
     cmdline.addHistory(`エラー: ${error.message}`, '#ff6666');
   }
 }
+
+// ──────────────────────────────────────────────
+// 矩形選択ヘルパー
+// ──────────────────────────────────────────────
+function isShapeInBox(s, sx0, sy0, sx1, sy1) {
+  // スクリーン座標のボックスをmm座標に変換
+  const mm0 = screenToMm({ x: sx0, y: sy0 }, viewport);
+  const mm1 = screenToMm({ x: sx1, y: sy1 }, viewport);
+  const x0 = Math.min(mm0.x, mm1.x), x1 = Math.max(mm0.x, mm1.x);
+  const y0 = Math.min(mm0.y, mm1.y), y1 = Math.max(mm0.y, mm1.y);
+  if (s.type === 'line') {
+    return x0 <= s.x1 && s.x1 <= x1 && y0 <= s.y1 && s.y1 <= y1
+        && x0 <= s.x2 && s.x2 <= x1 && y0 <= s.y2 && s.y2 <= y1;
+  }
+  if (s.type === 'rect') {
+    return x0 <= s.x && s.x + s.w <= x1 && y0 <= s.y && s.y + s.h <= y1;
+  }
+  if (s.type === 'circle' || s.type === 'arc') {
+    return x0 <= s.cx - s.r && s.cx + s.r <= x1 && y0 <= s.cy - s.r && s.cy + s.r <= y1;
+  }
+  if (s.type === 'text' || s.type === 'point') {
+    return x0 <= s.x && s.x <= x1 && y0 <= s.y && s.y <= y1;
+  }
+  return false;
+}
+
+// ──────────────────────────────────────────────
+// コンテキストメニュー
+// ──────────────────────────────────────────────
+const ctxMenu = document.getElementById('ctx-menu');
+
+function showContextMenu(x, y) {
+  if (!ctxMenu) return;
+  const hasSelection = selectedId !== null || selectedIds.size > 0;
+  // 選択状態に応じてアイテムのdisabled制御
+  const items = ctxMenu.querySelectorAll('.ctx-item');
+  for (const item of items) {
+    const action = item.dataset.action;
+    const needsSelection = ['copy', 'delete', 'move', 'rotate', 'mirror', 'offset'].includes(action);
+    if (needsSelection && !hasSelection) {
+      item.classList.add('disabled');
+    } else {
+      item.classList.remove('disabled');
+    }
+  }
+  // 表示位置
+  ctxMenu.style.left = `${x}px`;
+  ctxMenu.style.top = `${y}px`;
+  ctxMenu.classList.add('visible');
+
+  // 画面外に出ないよう調整
+  const rect = ctxMenu.getBoundingClientRect();
+  if (rect.right > window.innerWidth) ctxMenu.style.left = `${x - rect.width}px`;
+  if (rect.bottom > window.innerHeight) ctxMenu.style.top = `${y - rect.height}px`;
+}
+
+function hideContextMenu() {
+  ctxMenu?.classList.remove('visible');
+}
+
+ctxMenu?.addEventListener('click', (event) => {
+  const item = event.target.closest('.ctx-item');
+  if (!item || item.classList.contains('disabled')) return;
+  hideContextMenu();
+  const action = item.dataset.action;
+
+  if (action === 'select-all') {
+    selectedIds.clear();
+    for (const s of shapes) selectedIds.add(s.id);
+    selectedId = null;
+    cmdline.addHistory(`すべて選択: ${shapes.length}個`, '#8aa8c0');
+    redraw();
+  } else if (action === 'copy') {
+    const t = shapes.find((s) => s.id === selectedId);
+    if (t) { clipboard = shapeClone(t); cmdline.addHistory('コピー', '#8aa8c0'); }
+  } else if (action === 'paste') {
+    if (clipboard) {
+      const pasted = cloneWithOffset(clipboard, 10, 10);
+      shapes.push(pasted);
+      selectedId = pasted.id;
+      saveHistory();
+      redraw();
+    }
+  } else if (action === 'delete') {
+    deleteSelected();
+    cmdline.addHistory('削除', '#8aa8c0');
+  } else if (action === 'move') {
+    if (selectedId) changeTool(Tool.MOVE);
+  } else if (action === 'rotate') {
+    if (selectedId) changeTool(Tool.ROTATE);
+  } else if (action === 'mirror') {
+    if (selectedId) changeTool(Tool.MIRROR);
+  } else if (action === 'offset') {
+    changeTool(Tool.OFFSET);
+  } else if (action === 'fit') {
+    fitView();
+  } else if (action === 'undo') {
+    undo();
+  }
+});
+
+// コンテキストメニューを閉じる
+document.addEventListener('click', (e) => {
+  if (!ctxMenu?.contains(e.target)) hideContextMenu();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') hideContextMenu();
+}, true);
 
 // ──────────────────────────────────────────────
 // 初期描画
