@@ -41,16 +41,17 @@ export function drawGrid(gridLayer, stage, viewport) {
   // scaleが小さいと1mmグリッドが細かすぎるので、表示はズームに応じて間引く
   // ただしスナップは常に1mm
 
-  // グリッド間隔を決める（画面上で最低4px間隔になるmm数）
-  const minPx = 4;
+  // グリッド間隔: 画面上で最低1px間隔になるmm数（1mm基準）
+  // scale=1 → 1mm=1px → gridMm=1 で1mmグリッド表示
+  // ズームアウト時は自動間引き（線が細かくなりすぎないよう1px以上を維持）
   const candidates = [1, 2, 5, 10, 20, 50, 100, 500, 1000];
   let gridMm = 1000;
   for (const mm of candidates) {
-    if (mm * scale >= minPx) { gridMm = mm; break; }
+    if (mm * scale >= 1) { gridMm = mm; break; }
   }
 
-  // メイングリッド（太め）: gridMm * 5 または gridMm * 10
-  const mainGridMm = gridMm * 5;
+  // メイングリッド（少し明るい）: gridMm * 10
+  const mainGridMm = gridMm * 10;
 
   // サブグリッド描画（薄い）
   const startX = Math.floor(viewport.x / gridMm) * gridMm;
