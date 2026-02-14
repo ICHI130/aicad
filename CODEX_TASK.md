@@ -1,5 +1,5 @@
-# AI CAD - Codex 実装指示書 v3
-# 「AutoCAD不足機能 優先度順 実装タスク」
+# AI CAD - Codex 実装指示書 v4
+# 「Phase 3: 作図品質・操作性向上」
 
 > まず `git pull origin main` を実行してから作業すること。
 > 1機能ずつ `git commit` すること。最後に `git push origin main` すること。
@@ -7,9 +7,7 @@
 
 ---
 
-## ■ 現在の実装済み機能（触るな）
-
-以下はすでに動いている。壊さないこと。
+## ■ 実装済み機能（触るな・壊すな）
 
 | 機能 | ファイル |
 |------|---------|
@@ -18,7 +16,7 @@
 | TRIM/EXTEND/FILLET/ARRAY/HATCH/JOIN/EXPLODE | app.js |
 | DIM（線形寸法） | app.js + tools.js |
 | コマンドライン（L,C,REC,TR,MI等） | commandline.js |
-| レイヤー管理（表示/非表示/ロック） | layerpanel.js |
+| レイヤー管理（色・線種・表示/非表示/ロック） | layerpanel.js |
 | スナップ（端点/中点/交点/象限点） | snap.js |
 | ホイールズーム・パン・矩形選択 | app.js |
 | 右クリックコンテキストメニュー | app.js |
@@ -27,653 +25,334 @@
 | AI自動作図（JSONパース） | app.js |
 | PDF印刷 | app.js |
 | 多言語（日本語/英語） | i18n.js |
+| **プロパティパネル（色/線種/線幅/ジオメトリ）** | propertypanel.js |
+| **線種15種（実線/破線/一点鎖線等）** | linetypes.js |
+| **色変更（9マスパレット+カスタム、ByLayer対応）** | colors.js / propertypanel.js |
+| **グリップ編集（LINE/CIRCLE/RECT端点ドラッグ）** | app.js |
+| **交差選択（右→左で緑枠、触れたもの全選択）** | app.js |
+| **テキストダブルクリック再編集** | app.js |
+| **@W,H 矩形サイズ入力** | app.js |
+| **設定タブ（APIキー入力）** | index.html / sidebar.js |
+| **プロパティ変更リアルタイム反映（適用ボタンなし）** | propertypanel.js |
 
 ---
 
-## ■ 不足機能リスト（優先度順）
+## ■ 今回実装するフェーズ（PHASE 3）
 
 ---
 
-### 🔴 PHASE 1 - 最優先（CADとして最低限必要）
+### 🟢 P3-1: 動的入力（Dynamic Input / DYN）
 
----
-
-#### P1-1: プロパティパネル（Properties Panel）
-
-**何が問題か**: 図形を選択しても色・線種・線幅を変更できない。座標も編集できない。
-
-**実装内容**: `renderer/ui/propertypanel.js` を新規作成。
-
-図形選択時に右サイドバー上部（AIチャットの上）に表示するパネル。
-
-```
-┌──────────────────────────────┐
-│ プロパティ              [×]  │
-├──────────────────────────────┤
-│ 一般                         │
-│  色:    [■ #00bfff ▼]       │
-│  線種:  [実線 ▼]             │
-│  線幅:  [0.25mm ▼]           │
-│  レイヤ:[default ▼]          │
-├──────────────────────────────┤
-│ ジオメトリ                   │
-│  （図形タイプ別プロパティ）  │
-│  LINE:  X1:[___] Y1:[___]    │
-│         X2:[___] Y2:[___]    │
-│         長さ: 1234.5 mm      │
-│  CIRCLE: CX:[__] CY:[__]     │
-│          R:[___] mm          │
-│  RECT:  X:[__] Y:[__]        │
-│         W:[__] H:[__] mm     │
-│  TEXT:  文字:[__________]    │
-│         高さ:[__] 回転:[__]  │
-├──────────────────────────────┤
-│         [適用]               │
-└──────────────────────────────┘
-```
-
-**仕様**:
-- 図形選択時に自動表示、選択解除で非表示
-- 色変更: `<input type="color">` でカラーピッカー → shape.color に保存
-- 線種変更: selectドロップダウン → shape.linetype に保存
-- 線幅変更: selectドロップダウン → shape.linewidth に保存
-- 数値変更後「適用」クリックで shapes[] を更新 → saveHistory() → redraw()
-- 複数選択時は共通プロパティのみ表示
-
-**app.js 側の変更**:
-- shapes に `color`, `linetype`, `linewidth` プロパティを追加（省略時はデフォルト値）
-- `buildShapeNode()` でこれらを参照して描画色・線種・線幅を反映
-
-**tools.js の buildShapeNode() 変更**:
-```javascript
-// 色はshape.color があればそれを使う、なければレイヤーカラー、なければデフォルト
-const color = options.isPreview ? COLOR_PREVIEW
-            : options.isSelected ? COLOR_SELECT
-            : (shape.color || getLayerColor(shape.layer) || COLOR_LINE);
-
-// 線幅
-const sw = shape.linewidth ? shape.linewidth * viewport.scale : 1;
-
-// 線種 → dashパターン
-const dash = getDashPattern(shape.linetype, viewport.scale);
-```
-
----
-
-#### P1-2: 線種（Line Type）のフルサポート
-
-**何が問題か**: 現在は全図形が実線のみ。破線・一点鎖線が使えない。
-
-**実装内容**: `renderer/cad/linetypes.js` を新規作成。
-
-```javascript
-// linetypes.js
-// dashパターンは mm 単位。viewport.scale をかけてpxに変換して使う。
-export const LINE_TYPES = {
-  'CONTINUOUS': { label: '実線',         dash: null },
-  'DASHED':     { label: '破線',         dash: [12, 6] },
-  'DASHED2':    { label: '破線(細)',      dash: [6, 3] },
-  'DASHEDX2':   { label: '破線(太)',      dash: [24, 12] },
-  'CENTER':     { label: '一点鎖線',     dash: [24, 6, 4, 6] },
-  'CENTER2':    { label: '一点鎖線(細)', dash: [12, 4, 2, 4] },
-  'CENTERX2':   { label: '一点鎖線(太)', dash: [48, 10, 8, 10] },
-  'PHANTOM':    { label: '二点鎖線',     dash: [24, 6, 4, 6, 4, 6] },
-  'PHANTOM2':   { label: '二点鎖線(細)', dash: [12, 4, 2, 4, 2, 4] },
-  'DOT':        { label: '点線',         dash: [2, 6] },
-  'DOT2':       { label: '点線(細)',     dash: [1, 3] },
-  'DOTX2':      { label: '点線(太)',     dash: [4, 12] },
-  'HIDDEN':     { label: '隠れ線',       dash: [6, 4] },
-  'HIDDEN2':    { label: '隠れ線(細)',   dash: [3, 2] },
-  'DIVIDE':     { label: '長破線',       dash: [32, 6, 2, 6, 2, 6] },
-};
-
-// Konva用dashパターンに変換（scale倍してpxに）
-export function getDashPattern(linetype, scale) {
-  const lt = LINE_TYPES[linetype];
-  if (!lt || !lt.dash) return undefined; // 実線
-  return lt.dash.map(v => v * Math.max(scale, 0.5));
-}
-
-// 線種名一覧（ドロップダウン用）
-export function getLineTypeOptions() {
-  return Object.entries(LINE_TYPES).map(([id, { label }]) => ({ id, label }));
-}
-```
-
-**tools.js で使用**:
-```javascript
-import { getDashPattern } from './linetypes.js';
-// buildShapeNode内で:
-dash: getDashPattern(shape.linetype, viewport.scale)
-```
-
-**レイヤーにも線種を持たせる**:
-- `layers[]` の各レイヤーに `linetype: 'CONTINUOUS'` プロパティ追加
-- shape.linetype が `'ByLayer'` or undefined の場合、レイヤーの線種を使う
-
----
-
-#### P1-3: 色変更のフルサポート（ByLayer対応）
-
-**何が問題か**: 全図形が `#00bfff` 固定。図形ごと・レイヤーごとに色を変えられない。
-
-**実装内容**:
-
-`renderer/cad/colors.js` を新規作成:
-```javascript
-// AutoCAD標準色（ACI: AutoCAD Color Index）
-export const ACI_COLORS = [
-  { id: 1,  hex: '#FF0000', name: '赤' },
-  { id: 2,  hex: '#FFFF00', name: '黄' },
-  { id: 3,  hex: '#00FF00', name: '緑' },
-  { id: 4,  hex: '#00FFFF', name: 'シアン' },
-  { id: 5,  hex: '#0000FF', name: '青' },
-  { id: 6,  hex: '#FF00FF', name: 'マゼンタ' },
-  { id: 7,  hex: '#FFFFFF', name: '白' },
-  { id: 8,  hex: '#808080', name: 'グレー' },
-  { id: 9,  hex: '#C0C0C0', name: '薄グレー' },
-  // 追加カラー
-  { id: 'custom', hex: null, name: 'カスタム' },
-];
-
-export const DEFAULT_COLOR = '#00bfff'; // ByLayerデフォルト
-```
-
-**レイヤーパネル改修** (`layerpanel.js`):
-- 各レイヤー行に色スウォッチ（小さい色の四角）を追加
-- クリックで `<input type="color">` を開いてレイヤー色を変更
-- `layer.color` に保存 → redraw()
-
-**tools.js buildShapeNode() の色解決ロジック**:
-```javascript
-function resolveColor(shape, layers, isPreview, isSelected) {
-  if (isPreview) return '#ffff00';
-  if (isSelected) return '#ff4444';
-  if (shape.color && shape.color !== 'ByLayer') return shape.color;
-  // ByLayer: レイヤーの色を使う
-  const layer = layers.find(l => l.id === (shape.layer || 'default'));
-  return layer?.color || '#00bfff';
-}
-```
-
----
-
-#### P1-4: 矩形の寸法入力（@W,H）
-
-**何が問題か**: REC → 第1点クリック後に `@500,600` を入力しても矩形ができない。
-
-**app.js の修正**: RECT ツールの step=1 で座標確定時に相対座標を正しく処理する。
-
-```javascript
-// RECT の step=1 で座標入力時
-if (tool === Tool.RECT && drawingStart) {
-  // @500,600 → drawingStart から +500, +600 の点を end として使う
-  const end = handleCoordInput(str, drawingStart, null);
-  if (end) {
-    const shape = { id: newId(), type: 'rect', ...normalizeRect(drawingStart, end) };
-    shapes.push(assignCurrentLayer(shape));
-    saveHistory();
-    redraw();
-    changeTool(Tool.RECT); // 連続入力のためRESET
-  }
-}
-```
-
-commandline の `onCoordInput` コールバックから RECT のステップを処理すること。
-
----
-
-#### P1-5: グリップ編集（Grip Editing）
-
-**何が問題か**: 図形を選択しても変形できない。端点を掴んでドラッグで形状変更したい。
-
-**実装内容**: 選択図形に青い四角グリップを表示し、ドラッグで変形する。
-
-**app.js の修正**:
-
-状態変数:
-```javascript
-let gripState = null; // { shapeId, gripIndex, gripType }
-```
-
-redraw() でグリップを描画:
-```javascript
-function drawGrips(shape) {
-  const grips = getGripPoints(shape);
-  grips.forEach((g, i) => {
-    const sp = mmToScreen(g, viewport);
-    const rect = new Konva.Rect({
-      x: sp.x - 4, y: sp.y - 4,
-      width: 8, height: 8,
-      fill: '#0060ff', stroke: '#ffffff', strokeWidth: 1,
-      id: `grip_${shape.id}_${i}`,
-    });
-    snapLayer.add(rect);
-  });
-}
-
-function getGripPoints(shape) {
-  if (shape.type === 'line')   return [{ x: shape.x1, y: shape.y1 }, { x: shape.x2, y: shape.y2 }, { x: (shape.x1+shape.x2)/2, y: (shape.y1+shape.y2)/2 }];
-  if (shape.type === 'circle') return [{ x: shape.cx, y: shape.cy }, { x: shape.cx+shape.r, y: shape.cy }];
-  if (shape.type === 'arc')    return [{ x: shape.cx, y: shape.cy }];
-  if (shape.type === 'rect')   return [
-    { x: shape.x,        y: shape.y        },
-    { x: shape.x+shape.w, y: shape.y        },
-    { x: shape.x+shape.w, y: shape.y+shape.h },
-    { x: shape.x,        y: shape.y+shape.h },
-    { x: shape.x+shape.w/2, y: shape.y+shape.h/2 }, // 中心
-  ];
-  return [];
-}
-```
-
-mousedown でグリップクリック検出:
-```javascript
-// SELECT ツール + 図形選択中 → グリップヒットテスト
-function hitTestGrip(screenPt) {
-  if (!selectedId) return null;
-  const shape = shapes.find(s => s.id === selectedId);
-  if (!shape) return null;
-  const grips = getGripPoints(shape);
-  for (let i = 0; i < grips.length; i++) {
-    const sp = mmToScreen(grips[i], viewport);
-    if (Math.hypot(screenPt.x - sp.x, screenPt.y - sp.y) < 8) return i;
-  }
-  return null;
-}
-```
-
-mousemove でグリップドラッグ:
-```javascript
-if (gripState) {
-  const mm = getSnap();
-  applyGripMove(shapes.find(s => s.id === selectedId), gripState.index, mm);
-  redraw();
-}
-
-function applyGripMove(shape, gripIndex, mm) {
-  if (shape.type === 'line') {
-    if (gripIndex === 0) { shape.x1 = mm.x; shape.y1 = mm.y; }
-    else if (gripIndex === 1) { shape.x2 = mm.x; shape.y2 = mm.y; }
-    else { // 中点: 全体移動
-      const dx = mm.x - (shape.x1+shape.x2)/2;
-      const dy = mm.y - (shape.y1+shape.y2)/2;
-      shape.x1+=dx; shape.y1+=dy; shape.x2+=dx; shape.y2+=dy;
-    }
-  }
-  if (shape.type === 'circle') {
-    if (gripIndex === 0) { shape.cx = mm.x; shape.cy = mm.y; }
-    else { shape.r = Math.hypot(mm.x - shape.cx, mm.y - shape.cy); }
-  }
-  if (shape.type === 'rect') {
-    if (gripIndex === 0) { shape.w += shape.x - mm.x; shape.h += shape.y - mm.y; shape.x = mm.x; shape.y = mm.y; }
-    else if (gripIndex === 1) { shape.w = mm.x - shape.x; shape.h += shape.y - mm.y; shape.y = mm.y; }
-    else if (gripIndex === 2) { shape.w = mm.x - shape.x; shape.h = mm.y - shape.y; }
-    else if (gripIndex === 3) { shape.w += shape.x - mm.x; shape.h = mm.y - shape.y; shape.x = mm.x; }
-    else { // 中心
-      const dx = mm.x - (shape.x + shape.w/2);
-      const dy = mm.y - (shape.y + shape.h/2);
-      shape.x += dx; shape.y += dy;
-    }
-  }
-}
-```
-
-mouseup でグリップ確定 → saveHistory()
-
----
-
-### 🟡 PHASE 2 - 高優先度
-
----
-
-#### P2-1: 交差選択（Crossing Selection）
-
-**何が問題か**: 現在の矩形選択は左→右ドラッグで「完全包含」のみ。AutoCADは右→左で「交差選択」（触れたもの全部）。
-
-**実装内容** (`app.js` mousemove/mouseup):
-```javascript
-// mousedown時にドラッグ方向を記録
-// boxSelectStart = { x, y }（スクリーン座標）
-
-// mousemove: ドラッグ方向で色を変える
-const isCrossing = currentX < boxSelectStart.x; // 右→左 = 交差選択
-selectRect.style.border = isCrossing
-  ? '1px dashed #00cc44'   // 緑の破線 = 交差選択
-  : '1px solid #4da6ff';   // 青の実線 = 窓選択
-selectRect.style.background = isCrossing
-  ? 'rgba(0,204,68,0.05)'
-  : 'rgba(77,166,255,0.06)';
-
-// mouseup: 判定方法を変える
-if (isCrossing) {
-  // 交差選択: ボックスに「一部でも」入っているもの全て
-  for (const s of shapes) {
-    if (shapeTouchesBbox(s, mmBbox)) selectedIds.add(s.id);
-  }
-} else {
-  // 窓選択: ボックスに「完全に」入っているもの
-  for (const s of shapes) {
-    if (shapeInsideBbox(s, mmBbox)) selectedIds.add(s.id);
-  }
-}
-```
-
-`shapeTouchesBbox(shape, bbox)` 関数を追加:
-- line: 両端点のどちらかがbbox内、またはboxと線分が交差
-- circle: 中心からbboxまでの最短距離 < r
-- rect: 矩形同士のオーバーラップ判定
-
----
-
-#### P2-2: 寸法の種類追加
-
-**何が問題か**: 現在は線形寸法（水平/垂直/平行）のみ。半径・直径・角度がない。
-
-**tools.js の buildShapeNode() に追加**:
-
-```javascript
-// 半径寸法 (DIMRADIUS)
-if (shape.type === 'dim' && shape.dimType === 'radius') {
-  // 円の中心から外周までの引出線 + "R1234"テキスト
-  const c = mmToScreen({ x: shape.cx, y: shape.cy }, viewport);
-  const p = mmToScreen({ x: shape.px, y: shape.py }, viewport); // 引き出し点
-  group.add(new Konva.Arrow({ points:[c.x,c.y,p.x,p.y], ...arrowStyle }));
-  group.add(new Konva.Text({ x: p.x+4, y: p.y-14, text: `R${Math.round(shape.r)}`, ...textStyle }));
-}
-
-// 直径寸法 (DIMDIAMETER)
-if (shape.type === 'dim' && shape.dimType === 'diameter') {
-  // 直径を通る線 + "φ1234"テキスト
-  group.add(new Konva.Text({ text: `φ${Math.round(shape.r*2)}`, ...textStyle }));
-}
-
-// 角度寸法 (DIMANGULAR)
-if (shape.type === 'dim' && shape.dimType === 'angle') {
-  // 2線間の角度 → 円弧 + "45.0°"テキスト
-}
-```
-
-**app.js の DIM ツール改修**:
-- DIM ツール選択後にコマンドラインで `R` → 半径寸法モード、`D` → 直径寸法モード
-- デフォルトは従来の線形寸法
-
----
-
-#### P2-3: 文字ダブルクリック再編集
-
-**何が問題か**: テキストを一度書いたら変更できない。
-
-**app.js の修正**:
-```javascript
-// SELECT ツールでダブルクリック → テキストなら再編集
-stage.on('dblclick', (e) => {
-  const mm = pointerToMm();
-  const hit = pickShape(mm);
-  if (hit && hit.type === 'text') {
-    startTextEdit(hit); // 既存テキストの内容でフロートinputを表示
-  }
-});
-
-function startTextEdit(shape) {
-  // shape.text を初期値としてフロートinputを表示
-  // Enter確定時 → shape.text = newValue; saveHistory(); redraw();
-  // 既存の startTextInput() を改修して既存shapeを渡せるようにする
-}
-```
-
----
-
-#### P2-4: レイヤーの色・線種設定
-
-**何が問題か**: レイヤーに色がなく、線種も設定できない。
-
-**layerpanel.js の改修**:
-
-レイヤー一覧の各行に列を追加:
-```
-┌────────────────────────────────────────┐
-│ レイヤー名 │ 色  │ 線種     │ 👁 │ 🔒 │
-├────────────────────────────────────────┤
-│ default    │ ■  │ 実線 ▼  │ 👁 │ 🔓 │
-│ 壁         │ ■  │ 実線 ▼  │ 👁 │ 🔓 │
-│ 寸法       │ ■  │ ─ ─ ▼  │ 👁 │ 🔓 │
-└────────────────────────────────────────┘
-```
-
-- 色スウォッチクリック → `<input type="color">` → `layer.color` 更新
-- 線種ドロップダウン → `layer.linetype` 更新
-
-`layers[]` のデータ構造に追加:
-```javascript
-// layers配列の各要素
-{
-  id: 'default',
-  name: 'default',
-  visible: true,
-  locked: false,
-  color: '#00bfff',    // 追加
-  linetype: 'CONTINUOUS', // 追加
-  linewidth: 0.25,     // 追加（mm）
-}
-```
-
----
-
-#### P2-5: 線幅（Line Weight）サポート
-
-**何が問題か**: 全図形が1px固定。印刷時の太さが反映されない。
-
-**実装内容**:
-- 標準線幅: `[0.13, 0.18, 0.25, 0.35, 0.5, 0.7, 1.0, 1.4, 2.0]` mm
-- プロパティパネルのドロップダウンで選択
-- `shape.linewidth` に mm値で保存
-- `buildShapeNode()` で `strokeWidth = shape.linewidth * viewport.scale`
-- ただし最小1px（ズームアウト時に細すぎないように）
-
-```javascript
-// tools.js
-const sw = Math.max(1, (shape.linewidth || 0.25) * viewport.scale);
-```
-
----
-
-#### P2-6: CHAMFER（面取り）コマンド
-
-**何が問題か**: フィレットはあるが面取り（直線カット）がない。
-
-**実装内容**:
-- コマンド: `CHA` → `chamfer`
-- 操作: 距離1入力 → 距離2入力 → 線1クリック → 線2クリック → 交点を斜め線で面取り
-- フィレットと同じ操作フローで `filletState` を流用可能
-
----
-
-### 🟢 PHASE 3 - 中優先度
-
----
-
-#### P3-1: 動的入力（Dynamic Input / DYN）
-
-**何が問題か**: 作図中に現在の長さ・角度がリアルタイムで見えない。
+**何が問題か**: 作図中に現在の長さ・角度がリアルタイムで見えない。コマンドラインを見ないと距離が分からない。
 
 **実装内容**: `renderer/ui/dyninput.js` を新規作成。
 
 カーソル近くにフロートDIVを表示:
 ```
-   [長さ: 1234.5]
-   [角度:  45.0°]
+   ┌────────────────┐
+   │ 長さ: 1234.5mm │
+   │ 角度:   45.0°  │
+   └────────────────┘
 ```
 
-- position: fixed でマウス位置の近く（右下）に追従
-- 作図中の mousemove で現在の距離・角度をリアルタイム更新
-- 数字キー入力でそのフィールドに直接入力可能
-- Tab で長さ↔角度フィールドを切り替え
+仕様:
+- `position: fixed` でマウス位置の右下（+20px, +20px）に追従
+- 作図中（LINE/RECT/CIRCLE等の step > 0）の mousemove でリアルタイム更新
+- 距離 = 始点〜現在点のmm距離
+- 角度 = atan2で計算（0°=右、反時計回り正）
+- SELECT/非作図時は非表示
+- F11キーでON/OFFトグル
+
+```javascript
+// dyninput.js
+export function initDynInput() {
+  const div = document.createElement('div');
+  div.id = 'dyn-input';
+  div.style.cssText = `
+    position: fixed; pointer-events: none; z-index: 500;
+    background: rgba(20,25,32,0.9); border: 1px solid #4da6ff;
+    border-radius: 4px; padding: 4px 8px; font-size: 11px;
+    font-family: monospace; color: #e8e8e8; display: none;
+    white-space: nowrap;
+  `;
+  document.body.appendChild(div);
+
+  return {
+    update(screenX, screenY, from, to) {
+      // from, to はmm座標 {x, y}
+      const dist = Math.hypot(to.x - from.x, to.y - from.y);
+      const angle = Math.atan2(-(to.y - from.y), to.x - from.x) * 180 / Math.PI;
+      div.innerHTML = `長さ: ${dist.toFixed(1)}mm<br>角度: ${((angle % 360) + 360) % 360 | 0}°`;
+      div.style.left = (screenX + 20) + 'px';
+      div.style.top  = (screenY + 20) + 'px';
+      div.style.display = 'block';
+    },
+    hide() { div.style.display = 'none'; },
+    toggle() { /* F11でON/OFFフラグ切り替え */ },
+  };
+}
+```
+
+**app.js への組み込み**:
+- `initDynInput()` を起動時に呼ぶ
+- mousemove 内で、作図中（drawingStart が存在する場合）に `dynInput.update(screenX, screenY, drawingStart, currentMm)` を呼ぶ
+- SELECT時・mouseup後は `dynInput.hide()` を呼ぶ
 
 ---
 
-#### P3-2: ELLIPSE（楕円）ツール
+### 🟢 P3-2: ELLIPSE（楕円）ツール
 
-**何が問題か**: 楕円がない。建築図面では柱の断面等で使う。
+**何が問題か**: 楕円がない。柱断面・家具記号等で多用する。
 
-**shape型**: `{ type: 'ellipse', cx, cy, rx, ry, rotation }`
+**shape型**:
+```javascript
+{ type: 'ellipse', cx, cy, rx, ry, rotation: 0, color, linetype, linewidth, layerId }
+```
 
-**操作**: 中心クリック → X軸端点クリック → Y軸長さ入力
+**tools.js buildShapeNode() に追加**:
+```javascript
+if (shape.type === 'ellipse') {
+  const c = mmToScreen({ x: shape.cx, y: shape.cy }, viewport);
+  return new Konva.Ellipse({
+    x: c.x, y: c.y,
+    radiusX: shape.rx * viewport.scale,
+    radiusY: shape.ry * viewport.scale,
+    rotation: shape.rotation || 0,
+    stroke: color, strokeWidth: sw, fill: 'transparent',
+    dash, id: shape.id, listening: !isPreview,
+  });
+}
+```
+
+**app.js のツール追加**:
+```javascript
+Tool.ELLIPSE = 'ellipse';
+// コマンド: EL → ellipse
+// Step 0: 中心クリック
+// Step 1: X軸端点クリック → rx確定
+// Step 2: Y軸端点クリック → ry確定 → 確定
+```
+
+**ツールバーへの追加**:
+- 描画グループに「○楕円 [EL]」ボタンを追加
+
+**グリップ対応**:
+```javascript
+// getGripPoints() に追加
+if (shape.type === 'ellipse') return [
+  { x: shape.cx, y: shape.cy },           // 中心
+  { x: shape.cx + shape.rx, y: shape.cy }, // X軸端
+  { x: shape.cx, y: shape.cy + shape.ry }, // Y軸端
+];
+```
 
 ---
 
-#### P3-3: SPLINE（スプライン曲線）
-
-**何が問題か**: 曲線が円弧しかない。
-
-**shape型**: `{ type: 'spline', points: [{x,y},...], closed: false }`
-
-**描画**: Konva.Line with tension=0.5
-
----
-
-#### P3-4: BREAK（線分分割）
+### 🟢 P3-3: BREAK（線分分割）コマンド
 
 **何が問題か**: 線を2点で切断する機能がない。
 
-**コマンド**: `BR` → `break`
+**コマンド**: `BR` → `Tool.BREAK`
 
-操作: 線をクリック → 切断点1 → 切断点2 → その間を削除
-
----
-
-#### P3-5: LENGTHEN（長さ変更）
-
-**コマンド**: `LEN`
-
-操作: 線をクリック → 新しい長さを入力（または増分を入力）
-
----
-
-#### P3-6: MEASURE / DIVIDE（等分）
-
-**MEASURE**: 線分を指定間隔で点を配置
-**DIVIDE**: 線分を指定個数で等分割して点を配置
-
----
-
-#### P3-7: 寸法スタイル設定
-
-**何が問題か**: 寸法の矢印サイズ・文字高さ・単位が固定。
-
-**実装内容**: `renderer/ui/dimstyle.js`
-
-設定項目:
-- 文字高さ (default: 2.5mm)
-- 矢印サイズ (default: 2.5mm)
-- 寸法オフセット (default: 10mm)
-- 単位 (mm / m / cm)
-- 小数点以下桁数 (0〜3)
-
----
-
-#### P3-8: STRETCH（ストレッチ）
-
-**コマンド**: `S` → `stretch`（現在Sはselectに割り当て。`ST`に変更）
-
-操作: 交差選択で端点を選択 → 基点 → 目標点 → 選択端点だけ動く
-
----
-
-### 🔵 PHASE 4 - 低優先度（将来実装）
-
----
-
-#### P4-1: ブロック機能（BLOCK/INSERT）
-
-- BLOCK定義: 複数図形をまとめて部品化
-- INSERT: 名前を指定して配置（スケール・回転対応）
-- DXFブロック読み込み時にブロックとして扱う
-
-#### P4-2: 印刷設定（用紙・縮尺）
-
-- 用紙サイズ: A1/A2/A3/A4
-- 縮尺: 1/1, 1/50, 1/100, 1/200
-- 余白設定
-- 印刷プレビュー
-
-#### P4-3: PEDIT（ポリライン編集）
-
-- 頂点の追加・削除・移動
-- 幅設定（テーパー付き線）
-
-#### P4-4: REGION（リージョン）とブール演算
-
-- 面積計算
-- UNION/SUBTRACT/INTERSECT
-
-#### P4-5: 座標系（UCS）
-
-- カスタム座標系の定義
-- 傾いた座標系での作図
-
----
-
-## ■ 実装順序（必ずこの順で）
-
+**操作フロー**:
 ```
-Step 1: linetypes.js 作成 + buildShapeNode()で線種反映
-Step 2: colors.js 作成 + レイヤーに color プロパティ + buildShapeNode()で色解決
-Step 3: propertypanel.js 作成（色/線種/線幅/ジオメトリ編集）
-Step 4: layerpanel.js に色・線種列を追加
-Step 5: @W,H 矩形入力を修正
-Step 6: グリップ編集（LINE/CIRCLE/RECT）
-Step 7: 交差選択（右→左ドラッグ = 緑枠）
-Step 8: 寸法追加（半径/直径）
-Step 9: 文字ダブルクリック再編集
-Step 10: CHAMFER コマンド
+BR → 「切断する線をクリック」 → 「切断点1をクリック」 → 「切断点2をクリック」 → 完了
 ```
 
----
-
-## ■ ファイル構成（追加するもの）
-
-```
-renderer/
-  cad/
-    linetypes.js     ← 新規: 線種定義・dashパターン
-    colors.js        ← 新規: AutoCAD標準色・ByLayer解決
-  ui/
-    propertypanel.js ← 新規: プロパティパネル
-    dyninput.js      ← 新規: 動的入力（DYN）
-```
-
----
-
-## ■ データ構造の変更（後方互換を保つこと）
-
-shapes[] の各要素に以下を追加（全てオプション、省略時はデフォルト値）:
+**app.js の実装**:
 ```javascript
-{
-  // 既存
-  id: 'shape_xxx',
-  type: 'line',
-  // 既存のジオメトリプロパティ...
+// breakState = { shapeId, pt1 }
+// Step 1: 図形クリック → breakState.shapeId = hit.id
+// Step 2: 点1クリック → breakState.pt1 = mm
+// Step 3: 点2クリック → 線分を分割
 
-  // 新規追加（省略可能）
-  color: '#ff0000',          // 省略時 → ByLayer
-  linetype: 'DASHED',        // 省略時 → ByLayer (= 'CONTINUOUS')
-  linewidth: 0.5,            // 省略時 → ByLayer (= 0.25mm)
-  layer: 'default',          // 既存だが明示
+function applyBreak(shapeId, pt1, pt2) {
+  const shape = shapes.find(s => s.id === shapeId);
+  if (!shape || shape.type !== 'line') return;
+  // pt1, pt2 を線上に投影して t1, t2 を求める
+  // t1 < t2 の間を削除
+  // shape を [始点〜pt1] の線分に縮める
+  // [pt2〜終点] の新しい線分を追加
+  const newLine = { id: newId(), type: 'line',
+    x1: pt2.x, y1: pt2.y,
+    x2: shape.x2, y2: shape.y2,
+    color: shape.color, linetype: shape.linetype, linewidth: shape.linewidth, layerId: shape.layerId };
+  shape.x2 = pt1.x; shape.y2 = pt1.y;
+  shapes.push(newLine);
+  saveHistory(); redraw();
 }
 ```
 
-layers[] の各要素:
+---
+
+### 🟢 P3-4: LENGTHEN（長さ変更）コマンド
+
+**コマンド**: `LEN` → `Tool.LENGTHEN`
+
+**操作フロー**:
+```
+LEN → 「変更する線をクリック（端点側）」 → コマンドラインで新しい長さを入力 → 確定
+```
+
+**実装**:
 ```javascript
-{
-  id: 'default',
-  name: 'default',
-  visible: true,
-  locked: false,
-  color: '#00bfff',           // 新規追加
-  linetype: 'CONTINUOUS',     // 新規追加
-  linewidth: 0.25,            // 新規追加
+// 線の始点に近い端 vs 終点に近い端を判定して、その端を延長/縮小
+function applyLengthen(shape, endIndex, newLength) {
+  const len = Math.hypot(shape.x2-shape.x1, shape.y2-shape.y1);
+  const ratio = newLength / len;
+  if (endIndex === 1) { // 終点側
+    shape.x2 = shape.x1 + (shape.x2-shape.x1) * ratio;
+    shape.y2 = shape.y1 + (shape.y2-shape.y1) * ratio;
+  } else { // 始点側
+    shape.x1 = shape.x2 + (shape.x1-shape.x2) * ratio;
+    shape.y1 = shape.y2 + (shape.y1-shape.y2) * ratio;
+  }
 }
+```
+
+---
+
+### 🟢 P3-5: CHAMFER（面取り）コマンド
+
+**コマンド**: `CHA` → `Tool.CHAMFER`
+
+**操作フロー**:
+```
+CHA → コマンドラインで距離1を入力 → 距離2を入力 → 線1クリック → 線2クリック → 面取り実行
+```
+
+**実装**:
+```javascript
+// chamferState = { dist1, dist2, line1Id }
+// 2線の交点を求め、各線から dist1, dist2 の点を計算
+// 各線を交点側で縮め、2点間に新しい斜め線を追加
+// FILLETと同じ構造で実装できる（radius=0 のフィレット + 斜め線追加）
+```
+
+---
+
+### 🟢 P3-6: 寸法の種類追加（半径・直径）
+
+**何が問題か**: 現在は線形寸法のみ。円の半径・直径寸法がない。
+
+**tools.js buildShapeNode() に追加**:
+
+```javascript
+if (shape.type === 'dim' && shape.dimType === 'radius') {
+  // 円の中心から引き出し点へ矢印 + "R1234"テキスト
+  const group = new Konva.Group({ id: shape.id, listening: !isPreview });
+  const c  = mmToScreen({ x: shape.cx, y: shape.cy }, viewport);
+  const pt = mmToScreen({ x: shape.px, y: shape.py }, viewport);
+  group.add(new Konva.Arrow({
+    points: [c.x, c.y, pt.x, pt.y],
+    stroke: color, fill: color, strokeWidth: sw,
+    pointerLength: 8, pointerWidth: 6,
+  }));
+  group.add(new Konva.Text({
+    x: pt.x + 4, y: pt.y - 14,
+    text: `R${Math.round(shape.r)}`,
+    fontSize: Math.max(10, 10 * viewport.scale), fill: color,
+  }));
+  return group;
+}
+
+if (shape.type === 'dim' && shape.dimType === 'diameter') {
+  // 直径線（中心を通る） + "φ1234"テキスト
+  const group = new Konva.Group({ id: shape.id, listening: !isPreview });
+  const p1 = mmToScreen({ x: shape.cx - shape.r, y: shape.cy }, viewport);
+  const p2 = mmToScreen({ x: shape.cx + shape.r, y: shape.cy }, viewport);
+  const mid = mmToScreen({ x: shape.cx, y: shape.cy - shape.r * 0.5 }, viewport);
+  group.add(new Konva.Arrow({ points: [p1.x,p1.y,p2.x,p2.y], stroke:color, fill:color, strokeWidth:sw, pointerLength:8, pointerWidth:6 }));
+  group.add(new Konva.Arrow({ points: [p2.x,p2.y,p1.x,p1.y], stroke:color, fill:color, strokeWidth:sw, pointerLength:8, pointerWidth:6 }));
+  group.add(new Konva.Text({ x: mid.x+4, y: mid.y-14, text: `φ${Math.round(shape.r*2)}`, fontSize: Math.max(10, 10*viewport.scale), fill: color }));
+  return group;
+}
+```
+
+**app.js のDIMコマンド改修**:
+```javascript
+// DIM選択後にコマンドライン入力:
+//   (Enter/何も入力) → 線形寸法（従来）
+//   R               → 半径寸法モード（円をクリック→引き出し点クリック）
+//   D               → 直径寸法モード（円をクリック）
+```
+
+**shape データ**:
+```javascript
+// 半径寸法
+{ type: 'dim', dimType: 'radius', cx, cy, r, px, py }
+// 直径寸法
+{ type: 'dim', dimType: 'diameter', cx, cy, r }
+```
+
+---
+
+### 🟢 P3-7: 寸法スタイル設定
+
+**何が問題か**: 矢印サイズ・文字高さ・単位が固定。
+
+**実装内容**: `renderer/ui/dimstyle.js` を新規作成。
+
+```javascript
+// dimstyle.js
+export const DEFAULT_DIM_STYLE = {
+  textHeight: 2.5,   // mm
+  arrowSize: 2.5,    // mm
+  offset: 10,        // mm（寸法線と図形の距離）
+  unit: 'mm',        // 'mm' | 'm' | 'cm'
+  precision: 0,      // 小数点以下桁数
+};
+
+let currentStyle = { ...DEFAULT_DIM_STYLE };
+
+export function getDimStyle() { return currentStyle; }
+export function setDimStyle(patch) { Object.assign(currentStyle, patch); }
+```
+
+**設定UIの追加場所**: 設定タブ（`index.html` の `#sidebar-tab-settings`）に「📐 寸法スタイル」セクションを追加。
+
+```html
+<div class="settings-title">📐 寸法スタイル</div>
+<label class="settings-label">文字高さ (mm)
+  <input id="dim-text-height" type="number" min="0.5" step="0.5" value="2.5" />
+</label>
+<label class="settings-label">矢印サイズ (mm)
+  <input id="dim-arrow-size" type="number" min="0.5" step="0.5" value="2.5" />
+</label>
+<label class="settings-label">単位
+  <select id="dim-unit">
+    <option value="mm">mm</option>
+    <option value="cm">cm</option>
+    <option value="m">m</option>
+  </select>
+</label>
+<label class="settings-label">小数点以下
+  <select id="dim-precision">
+    <option value="0">0桁（1234）</option>
+    <option value="1">1桁（1234.5）</option>
+    <option value="2">2桁（1234.56）</option>
+  </select>
+</label>
+```
+
+**tools.js の dim描画で getDimStyle() を参照する**:
+```javascript
+import { getDimStyle } from '../ui/dimstyle.js';
+// buildShapeNode内のdim処理でstyle.textHeight, style.arrowSizeを使う
+```
+
+---
+
+## ■ 実装順序（この順で）
+
+```
+Step 1: dyninput.js 作成 + app.js組み込み（LINE/RECT/CIRCLE作図中に距離・角度表示）
+Step 2: ELLIPSE ツール（tools.js + app.js + toolbar.js）
+Step 3: BREAK コマンド（app.js）
+Step 4: LENGTHEN コマンド（app.js）
+Step 5: CHAMFER コマンド（app.js）
+Step 6: 半径・直径寸法（tools.js + app.js）
+Step 7: dimstyle.js 作成 + 設定タブに寸法スタイルUI追加
 ```
 
 ---
@@ -686,25 +365,23 @@ layers[] の各要素:
 - viewport の `{ x, y, scale }` 構造
 - IPC は preload.js 経由のみ（main.js に直接触らない）
 - Undo/Redo の history[] 構造
+- `propertypanel.js` の実装（リアルタイム反映・9マスパレット）
+- `layerpanel.js` の実装（色・線種設定）
 
 ---
 
 ## ■ 完了チェックリスト
 
-Phase 1:
-- [ ] 図形選択時にプロパティパネルが表示される
-- [ ] 色ピッカーで図形の色を変更できる
-- [ ] 線種ドロップダウンで破線・一点鎖線に変更できる
-- [ ] 線幅ドロップダウンで線幅を変更できる
-- [ ] @500,600 入力で幅500・高さ600の矩形ができる
-- [ ] 図形選択後に青いグリップが表示される
-- [ ] グリップをドラッグすると形状が変わる
-
-Phase 2:
-- [ ] 右→左ドラッグで緑枠の交差選択ができる
-- [ ] 円に半径寸法を記入できる（R1000）
-- [ ] テキストをダブルクリックで再編集できる
-- [ ] レイヤーパネルで色を変更できる
-- [ ] レイヤーで線種を設定できる
+Phase 3:
+- [ ] LINE作図中にカーソル近くに距離・角度が表示される（DYN）
+- [ ] CIRCLE/RECT作図中にも距離が表示される
+- [ ] `EL` コマンドで楕円が描ける
+- [ ] `BR` コマンドで線を2点で分割できる
+- [ ] `LEN` コマンドで線の長さを変更できる
+- [ ] `CHA` コマンドで面取りができる
+- [ ] 円を選択してDIM→Rで半径寸法（R1000）が記入できる
+- [ ] 円を選択してDIM→Dで直径寸法（φ2000）が記入できる
+- [ ] 設定タブで寸法スタイル（文字高さ・矢印・単位）を変更できる
+- [ ] 寸法スタイルの変更が既存寸法に反映される
 
 完了後 `git push origin main` すること。
