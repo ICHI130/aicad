@@ -17,6 +17,15 @@ npm install
 npm start
 ```
 
+## AutoCAD移行向け教材（追加）
+
+リポジトリに以下の教材PDFを追加しました。AutoCADユーザーの移行設計に活用します。
+
+- `autocad標準教科書.pdf`
+- `autocad応用教科書.pdf`
+
+機能差分の整理と実装優先度は `docs/autocad-textbook-integration-plan.md` にまとめています。
+
 ## 開発状況
 
 Phase 1 開発中（基本描画・AI連携）
