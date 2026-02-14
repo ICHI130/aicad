@@ -44,10 +44,12 @@ function collectCandidates(out, mmPoint, s, threshold, enabled) {
     }
   }
 
-  if (enabled.has('midpoint') && s.type === 'line') {
-    const mid = { x: (s.x1 + s.x2) / 2, y: (s.y1 + s.y2) / 2 };
-    const d = dist(mmPoint, mid);
-    if (d < threshold) out.push({ ...mid, type: 'midpoint', dist: d });
+  if (enabled.has('midpoint')) {
+    for (const seg of getSegments(s)) {
+      const mid = { x: (seg.x1 + seg.x2) / 2, y: (seg.y1 + seg.y2) / 2 };
+      const d = dist(mmPoint, mid);
+      if (d < threshold) out.push({ ...mid, type: 'midpoint', dist: d });
+    }
   }
 
   if (enabled.has('quadrant') && (s.type === 'circle' || s.type === 'arc')) {
@@ -106,6 +108,38 @@ function getEndpoints(s) {
       { x: s.x, y: s.y + s.h },
     ];
   }
+  if (s.type === 'polyline_preview' && Array.isArray(s.points)) return s.points;
+  return [];
+}
+
+function getSegments(s) {
+  if (s.type === 'line') {
+    return [{ x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2 }];
+  }
+
+  if (s.type === 'rect') {
+    const p1 = { x: s.x, y: s.y };
+    const p2 = { x: s.x + s.w, y: s.y };
+    const p3 = { x: s.x + s.w, y: s.y + s.h };
+    const p4 = { x: s.x, y: s.y + s.h };
+    return [
+      { x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y },
+      { x1: p2.x, y1: p2.y, x2: p3.x, y2: p3.y },
+      { x1: p3.x, y1: p3.y, x2: p4.x, y2: p4.y },
+      { x1: p4.x, y1: p4.y, x2: p1.x, y2: p1.y },
+    ];
+  }
+
+  if (s.type === 'polyline_preview' && Array.isArray(s.points) && s.points.length >= 2) {
+    const segments = [];
+    for (let i = 0; i < s.points.length - 1; i += 1) {
+      const a = s.points[i];
+      const b = s.points[i + 1];
+      segments.push({ x1: a.x, y1: a.y, x2: b.x, y2: b.y });
+    }
+    return segments;
+  }
+
   return [];
 }
 
@@ -184,7 +218,11 @@ function normalizeDeg(deg) {
 }
 
 function getLineIntersections(shapes, excludeShapeId = null) {
-  const lines = shapes.filter((s) => s.type === 'line' && (!excludeShapeId || s.id !== excludeShapeId));
+  const lines = [];
+  for (const s of shapes) {
+    if (excludeShapeId && s.id === excludeShapeId) continue;
+    for (const seg of getSegments(s)) lines.push(seg);
+  }
   const intersections = [];
   for (let i = 0; i < lines.length; i += 1) {
     for (let j = i + 1; j < lines.length; j += 1) {

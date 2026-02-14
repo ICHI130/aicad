@@ -10,6 +10,9 @@ export function initLayerPanel({
   onToggleLayerLocked,
   onUpdateLayerColor,
   onUpdateLayerLinetype,
+  onUpdateLayerLinewidth,
+  onSaveLayerState,
+  onLoadLayerState,
 }) {
   const root = document.getElementById('layer-panel');
   if (!root) return { refresh() {} };
@@ -64,6 +67,19 @@ export function initLayerPanel({
     currentRow.append(currentLabel, currentSelect);
     root.appendChild(currentRow);
 
+    const stateRow = document.createElement('div');
+    stateRow.className = 'layer-state-row';
+    const saveStateBtn = document.createElement('button');
+    saveStateBtn.className = 'layer-add-btn';
+    saveStateBtn.textContent = t('layer_state_save');
+    saveStateBtn.addEventListener('click', () => onSaveLayerState?.());
+    const loadStateBtn = document.createElement('button');
+    loadStateBtn.className = 'layer-add-btn';
+    loadStateBtn.textContent = t('layer_state_load');
+    loadStateBtn.addEventListener('click', () => onLoadLayerState?.());
+    stateRow.append(saveStateBtn, loadStateBtn);
+    root.appendChild(stateRow);
+
     const createRow = document.createElement('div');
     createRow.className = 'layer-create-row';
     const createInput = document.createElement('input');
@@ -87,7 +103,7 @@ export function initLayerPanel({
 
     const header = document.createElement('div');
     header.className = 'layer-list-header';
-    header.innerHTML = `<span></span><span>色</span><span>線種</span><span>${t('layer_visible')}</span><span>${t('layer_locked')}</span>`;
+    header.innerHTML = `<span></span><span>色</span><span>線種</span><span>${t('layer_linewidth')}</span><span>${t('layer_visible')}</span><span>${t('layer_locked')}</span>`;
     root.appendChild(header);
 
     const list = document.createElement('div');
@@ -119,6 +135,15 @@ export function initLayerPanel({
       linetypeSelect.value = layer.linetype || 'CONTINUOUS';
       linetypeSelect.addEventListener('change', () => onUpdateLayerLinetype?.(layer.id, linetypeSelect.value));
 
+      const widthInput = document.createElement('input');
+      widthInput.type = 'number';
+      widthInput.className = 'layer-width-input';
+      widthInput.min = '0.05';
+      widthInput.max = '5';
+      widthInput.step = '0.05';
+      widthInput.value = String(layer.linewidth ?? 0.25);
+      widthInput.addEventListener('change', () => onUpdateLayerLinewidth?.(layer.id, widthInput.value));
+
       const visibleBtn = document.createElement('button');
       visibleBtn.className = `layer-toggle ${layer.visible ? 'on' : 'off'}`;
       visibleBtn.textContent = layer.visible ? '👁' : '🚫';
@@ -129,7 +154,7 @@ export function initLayerPanel({
       lockedBtn.textContent = layer.locked ? '🔒' : '🔓';
       lockedBtn.addEventListener('click', () => onToggleLayerLocked(layer.id));
 
-      row.append(nameBtn, colorInput, linetypeSelect, visibleBtn, lockedBtn);
+      row.append(nameBtn, colorInput, linetypeSelect, widthInput, visibleBtn, lockedBtn);
       list.appendChild(row);
     }
 

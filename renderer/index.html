@@ -42,7 +42,8 @@
       .layer-title { font-size: 11px; color: #8aa8c0; font-weight: bold; }
       .layer-lang-row,
       .layer-current-row,
-      .layer-create-row { display: flex; gap: 6px; align-items: center; }
+      .layer-create-row,
+      .layer-state-row { display: flex; gap: 6px; align-items: center; }
       .layer-lang-row label,
       .layer-current-row label { font-size: 10px; color: #6a7480; min-width: 44px; }
       .layer-lang-select,
@@ -68,7 +69,7 @@
       .layer-list-header,
       .layer-row {
         display: grid;
-        grid-template-columns: 1fr 40px 96px 28px 28px;
+        grid-template-columns: 1fr 40px 80px 56px 28px 28px;
         gap: 4px;
         align-items: center;
       }
@@ -95,6 +96,15 @@
         padding: 0;
       }
       .layer-linetype-select {
+        width: 100%;
+        background: #0b0d10;
+        border: 1px solid #3a4450;
+        color: #d8e2ee;
+        border-radius: 3px;
+        font-size: 10px;
+        padding: 2px;
+      }
+      .layer-width-input {
         width: 100%;
         background: #0b0d10;
         border: 1px solid #3a4450;

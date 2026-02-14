@@ -161,6 +161,7 @@ const viewport = { x: 0, y: 0, scale: 1 };
 const shapes = [];
 const layers = [{ id: 'default', name: 'default', visible: true, locked: false, color: DEFAULT_LAYER_COLOR, linetype: 'CONTINUOUS', linewidth: 0.25 }];
 let currentLayerId = 'default';
+const LAYER_STATE_STORAGE_KEY = 'aicad:layer-state:v1';
 
 let tool = Tool.SELECT;
 let drawingStart = null;
@@ -302,6 +303,61 @@ function assignCurrentLayer(shape) {
   return { ...shape, layerId: layer.id };
 }
 
+function saveLayerState() {
+  const payload = {
+    currentLayerId,
+    layers: layers.map((layer) => ({
+      id: layer.id,
+      name: layer.name,
+      visible: layer.visible !== false,
+      locked: layer.locked === true,
+      color: layer.color || DEFAULT_LAYER_COLOR,
+      linetype: layer.linetype || 'CONTINUOUS',
+      linewidth: Number(layer.linewidth ?? 0.25),
+    })),
+  };
+  localStorage.setItem(LAYER_STATE_STORAGE_KEY, JSON.stringify(payload));
+}
+
+function loadLayerState() {
+  const raw = localStorage.getItem(LAYER_STATE_STORAGE_KEY);
+  if (!raw) return false;
+
+  let parsed = null;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return false;
+  }
+
+  if (!parsed || !Array.isArray(parsed.layers)) return false;
+
+  layers.length = 0;
+  for (const row of parsed.layers) {
+    const id = normalizeLayerId(row.id || row.name);
+    if (!id) continue;
+    layers.push({
+      id,
+      name: String(row.name || id),
+      visible: row.visible !== false,
+      locked: row.locked === true,
+      color: String(row.color || DEFAULT_LAYER_COLOR),
+      linetype: String(row.linetype || 'CONTINUOUS'),
+      linewidth: Math.max(0.05, Number(row.linewidth ?? 0.25) || 0.25),
+    });
+  }
+
+  if (!layers.length) {
+    layers.push({ id: 'default', name: 'default', visible: true, locked: false, color: DEFAULT_LAYER_COLOR, linetype: 'CONTINUOUS', linewidth: 0.25 });
+  }
+
+  const loadedCurrent = normalizeLayerId(parsed.currentLayerId || 'default');
+  currentLayerId = getLayer(loadedCurrent)?.id || layers[0].id;
+  return true;
+}
+
+
+loadLayerState();
 
 // ──────────────────────────────────────────────
 // 履歴管理
@@ -504,6 +560,27 @@ const layerPanel = initLayerPanel({
     layer.linetype = linetype;
     redraw();
     layerPanel.refresh();
+  },
+  onUpdateLayerLinewidth(layerId, linewidth) {
+    const layer = getLayer(layerId);
+    if (!layer) return;
+    const parsed = Number(linewidth);
+    layer.linewidth = Math.max(0.05, Number.isFinite(parsed) ? parsed : 0.25);
+    redraw();
+    layerPanel.refresh();
+  },
+  onSaveLayerState() {
+    saveLayerState();
+    cmdline.addHistory('レイヤー状態を保存', '#8aa8c0');
+  },
+  onLoadLayerState() {
+    if (!loadLayerState()) {
+      cmdline.addHistory('保存済みレイヤー状態がありません', '#cc7777');
+      return;
+    }
+    redraw();
+    layerPanel.refresh();
+    cmdline.addHistory('レイヤー状態を読込', '#8aa8c0');
   },
 });
 
