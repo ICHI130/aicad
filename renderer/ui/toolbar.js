@@ -29,6 +29,8 @@ const TOOL_DEFS = [
   { id: Tool.SCALE,    icon: '⇱', labelKey: 'scale', key: 'SC' },
   { id: Tool.OFFSET,   icon: '∥', labelKey: 'offset', key: 'O' },
   { id: Tool.MIRROR,   icon: '⇌', labelKey: 'mirror', key: 'MI' },
+  { id: Tool.JOIN,     icon: '⎯', labelKey: 'join', key: 'JO' },
+  { id: Tool.EXPLODE,  icon: '✳', labelKey: 'explode', key: 'X' },
   { id: Tool.TRIM,     icon: '✂', labelKey: 'trim', key: 'TR' },
   { id: Tool.EXTEND,   icon: '⤢', labelKey: 'extend', key: 'EX' },
   { id: Tool.FILLET,   icon: '⌐', labelKey: 'fillet', key: 'F' },

@@ -414,15 +414,16 @@
           <button id="save-gemini-api-key">Gemini APIキー保存</button>
 
           <div class="image-ref-box">
-            <div id="image-ref-meta">写真参照: なし</div>
-            <img id="image-ref-preview" alt="image reference preview" />
-            <input id="image-ref-input" type="file" accept="image/*" />
+            <div id="image-ref-meta">チェックバック資料: なし</div>
+            <img id="image-ref-preview" alt="reference preview" />
+            <input id="image-ref-input" type="file" accept="image/*,.pdf,application/pdf" />
             <div class="image-ref-actions">
-              <button id="image-ref-clear" type="button">写真クリア</button>
+              <button id="image-ref-clear" type="button">資料クリア</button>
+              <button id="apply-checkback" type="button">チェックバック反映(β)</button>
             </div>
           </div>
 
-          <textarea id="chat-input" rows="3" placeholder="「現調写真から間取りを簡易作図して」など"></textarea>
+          <textarea id="chat-input" rows="3" placeholder="「現調写真から間取りを簡易作図して」や「このチェックバックを反映して」など"></textarea>
           <button id="send-chat">送信 [Ctrl+Enter]</button>
         </div>
       </aside>

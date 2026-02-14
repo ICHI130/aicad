@@ -325,6 +325,14 @@ function changeTool(nextTool) {
   } else if (tool === Tool.HATCH) {
     cmdline.setLabel('[ハッチ] 境界(矩形/円)をクリック:');
     statusbar.setCustomGuide('境界をクリックしてハッチ作成');
+  } else if (tool === Tool.JOIN) {
+    runJoinCommand();
+    changeTool(Tool.SELECT);
+    return;
+  } else if (tool === Tool.EXPLODE) {
+    runExplodeCommand();
+    changeTool(Tool.SELECT);
+    return;
   }
 }
 
@@ -529,6 +537,164 @@ function distancePointToSegment(p, a, b) {
 }
 
 function shapeClone(shape) { return JSON.parse(JSON.stringify(shape)); }
+
+function getSelectionIds() {
+  const ids = new Set(selectedIds);
+  if (selectedId) ids.add(selectedId);
+  return ids;
+}
+
+function getSelectedShapes() {
+  const ids = getSelectionIds();
+  if (!ids.size) return [];
+  return shapes.filter((shape) => ids.has(shape.id));
+}
+
+function copySelectionToClipboard() {
+  const targets = getSelectedShapes();
+  if (!targets.length) return false;
+
+  clipboard = {
+    items: targets.map((shape) => shapeClone(shape)),
+    pasteCount: 0,
+  };
+  return true;
+}
+
+function pasteClipboard() {
+  if (!clipboard?.items?.length) return 0;
+  clipboard.pasteCount = (clipboard.pasteCount || 0) + 1;
+  const offset = 10 * clipboard.pasteCount;
+  const pastedIds = [];
+
+  for (const item of clipboard.items) {
+    const pasted = shapeClone(item);
+    pasted.id = `shape_${crypto.randomUUID()}`;
+    applyMove(pasted, offset, offset);
+    shapes.push(pasted);
+    pastedIds.push(pasted.id);
+  }
+
+  selectedId = null;
+  selectedIds = new Set(pastedIds);
+  if (pastedIds.length === 1) {
+    selectedId = pastedIds[0];
+    selectedIds.clear();
+  }
+  saveHistory();
+  redraw();
+  return pastedIds.length;
+}
+
+function pointsNear(a, b, eps = 1e-6) {
+  return Math.hypot(a.x - b.x, a.y - b.y) <= eps;
+}
+
+function runJoinCommand() {
+  const lines = getSelectedShapes().filter((shape) => shape.type === 'line');
+  if (lines.length < 2) {
+    cmdline.addHistory('JOIN: 2本の線を選択してください', '#ff6666');
+    return;
+  }
+  if (lines.length > 2) {
+    cmdline.addHistory('JOIN: 現在は2本の線のみ対応しています', '#ff6666');
+    return;
+  }
+
+  const [a, b] = lines;
+  const a1 = { x: a.x1, y: a.y1 }, a2 = { x: a.x2, y: a.y2 };
+  const b1 = { x: b.x1, y: b.y1 }, b2 = { x: b.x2, y: b.y2 };
+
+  let start = null;
+  let end = null;
+  if (pointsNear(a1, b1)) { start = a2; end = b2; }
+  else if (pointsNear(a1, b2)) { start = a2; end = b1; }
+  else if (pointsNear(a2, b1)) { start = a1; end = b2; }
+  else if (pointsNear(a2, b2)) { start = a1; end = b1; }
+
+  if (!start || !end) {
+    cmdline.addHistory('JOIN: 端点が接続している線を選択してください', '#ff6666');
+    return;
+  }
+
+  const removeIds = new Set([a.id, b.id]);
+  for (let i = shapes.length - 1; i >= 0; i -= 1) {
+    if (removeIds.has(shapes[i].id)) shapes.splice(i, 1);
+  }
+
+  const joined = assignCurrentLayer({
+    id: `shape_${crypto.randomUUID()}`,
+    type: 'line',
+    x1: start.x,
+    y1: start.y,
+    x2: end.x,
+    y2: end.y,
+    layerId: a.layerId,
+  });
+
+  shapes.push(joined);
+  selectedId = joined.id;
+  selectedIds.clear();
+  saveHistory();
+  redraw();
+  cmdline.addHistory('JOIN: 2本の線を結合しました', '#4da6ff');
+}
+
+function explodeShape(shape) {
+  if (shape.type === 'rect') {
+    return [
+      { type: 'line', x1: shape.x, y1: shape.y, x2: shape.x + shape.w, y2: shape.y },
+      { type: 'line', x1: shape.x + shape.w, y1: shape.y, x2: shape.x + shape.w, y2: shape.y + shape.h },
+      { type: 'line', x1: shape.x + shape.w, y1: shape.y + shape.h, x2: shape.x, y2: shape.y + shape.h },
+      { type: 'line', x1: shape.x, y1: shape.y + shape.h, x2: shape.x, y2: shape.y },
+    ];
+  }
+  if (shape.type === 'hatch') {
+    if (shape.hatchKind === 'rect') return [{ type: 'rect', x: shape.x, y: shape.y, w: shape.w, h: shape.h }];
+    if (shape.hatchKind === 'circle') return [{ type: 'circle', cx: shape.cx, cy: shape.cy, r: shape.r }];
+  }
+  return null;
+}
+
+function runExplodeCommand() {
+  const targets = getSelectedShapes();
+  if (!targets.length) {
+    cmdline.addHistory('EXPLODE: 図形を選択してください', '#ff6666');
+    return;
+  }
+
+  let changed = 0;
+  const newSelection = [];
+  for (const target of targets) {
+    const fragments = explodeShape(target);
+    if (!fragments || !fragments.length) continue;
+    const idx = shapes.findIndex((shape) => shape.id === target.id);
+    if (idx === -1) continue;
+    const inserts = fragments.map((fragment) => assignCurrentLayer({
+      ...fragment,
+      id: `shape_${crypto.randomUUID()}`,
+      layerId: target.layerId,
+    }));
+    shapes.splice(idx, 1, ...inserts);
+    changed += 1;
+    for (const ins of inserts) newSelection.push(ins.id);
+  }
+
+  if (!changed) {
+    cmdline.addHistory('EXPLODE: 分解できる図形（矩形/ハッチ）を選択してください', '#ff6666');
+    return;
+  }
+
+  selectedId = null;
+  selectedIds = new Set(newSelection);
+  if (newSelection.length === 1) {
+    selectedId = newSelection[0];
+    selectedIds.clear();
+  }
+  saveHistory();
+  redraw();
+  cmdline.addHistory(`EXPLODE: ${changed}個の図形を分解しました`, '#4da6ff');
+}
 
 function applyMove(shape, dx, dy) {
   if (shape.type === 'rect') { shape.x += dx; shape.y += dy; return; }
@@ -1760,17 +1926,16 @@ document.addEventListener('keydown', (event) => {
     if (lKey === 'y' || (lKey === 'z' && event.shiftKey)) { event.preventDefault(); redo(); return; }
     if (lKey === 's') { event.preventDefault(); exportCurrentDxf(); return; }
     if (lKey === 'p') { event.preventDefault(); printCurrentViewAsPdf(); return; }
-    if (lKey === 'c' && selectedId) {
-      const t = shapes.find((s) => s.id === selectedId);
-      if (t) clipboard = shapeClone(t);
+    if (lKey === 'c') {
+      event.preventDefault();
+      const copied = copySelectionToClipboard();
+      if (copied) cmdline.addHistory('クリップボードへコピー', '#8aa8c0');
       return;
     }
-    if (lKey === 'v' && clipboard) {
-      const pasted = cloneWithOffset(clipboard, 10, 10);
-      shapes.push(pasted);
-      selectedId = pasted.id;
-      saveHistory();
-      redraw();
+    if (lKey === 'v') {
+      event.preventDefault();
+      const count = pasteClipboard();
+      if (count > 0) cmdline.addHistory(`貼り付け: ${count}個`, '#8aa8c0');
       return;
     }
     if (lKey === 'a') {
@@ -1838,6 +2003,21 @@ document.addEventListener('keydown', (event) => {
   // C キー（ポリライン閉じる）
   if (lKey === 'c' && tool === Tool.POLYLINE) { finishPolyline(true); return; }
 
+  // 2文字ショートカット（AutoCAD風）
+  const chord = `${document._lastKey || ''}${lKey}`;
+  const hasSelection = selectedId || selectedIds.size > 0;
+  if (chord === 'za') { fitView(); document._lastKey = ''; return; }
+  if (chord === 'pl') { changeTool(Tool.POLYLINE); document._lastKey = ''; return; }
+  if (chord === 'tr') { changeTool(Tool.TRIM); document._lastKey = ''; return; }
+  if (chord === 'ex') { changeTool(Tool.EXTEND); document._lastKey = ''; return; }
+  if (chord === 'mi') { changeTool(Tool.MIRROR); document._lastKey = ''; return; }
+  if (chord === 'jo') { changeTool(Tool.JOIN); document._lastKey = ''; return; }
+  if (chord === 'sc') { changeTool(Tool.SCALE); document._lastKey = ''; return; }
+  if (chord === 'ar') { changeTool(Tool.ARRAY); document._lastKey = ''; return; }
+  if (chord === 'di') { changeTool(Tool.DIM); document._lastKey = ''; return; }
+  if (chord === 'co' && hasSelection) { changeTool(Tool.COPY); document._lastKey = ''; return; }
+  if (chord === 'ro' && hasSelection) { changeTool(Tool.ROTATE); document._lastKey = ''; return; }
+
   // F8: オルソ切替
   if (key === 'F8') { orthoMode = statusbar.toggleOrtho(); return; }
   // F7: グリッド切替
@@ -1846,12 +2026,19 @@ document.addEventListener('keydown', (event) => {
   if (key === 'F9') { snapMode = statusbar.toggleSnap(); return; }
 
   // ショートカットキー（ツール切替）
+  if (lKey === 'l') { changeTool(Tool.LINE); return; }
+  if (lKey === 'c') { changeTool(Tool.CIRCLE); return; }
+  if (lKey === 'a') { changeTool(Tool.ARC); return; }
+  if (lKey === 'p') { changeTool(Tool.POLYLINE); return; }
+  if (lKey === 'd') { changeTool(Tool.DIM); return; }
+  if (lKey === 't') { changeTool(Tool.TEXT); return; }
+  if (lKey === 'o') { changeTool(Tool.OFFSET); return; }
+  if (lKey === 'h') { changeTool(Tool.HATCH); return; }
+  if (lKey === 'x') { changeTool(Tool.EXPLODE); return; }
   if (lKey === 'f' && !event.shiftKey) { fitView(); return; }
-  if (lKey === 'm' && selectedId) { changeTool(Tool.MOVE); return; }
-  if (lKey === 'r' && selectedId) { changeTool(Tool.ROTATE); return; }
+  if (lKey === 'm' && hasSelection) { changeTool(Tool.MOVE); return; }
+  if (lKey === 'r' && hasSelection) { changeTool(Tool.ROTATE); return; }
 
-  // ZA: 全体表示
-  if (document._lastKey === 'z' && lKey === 'a') { fitView(); document._lastKey = ''; return; }
   document._lastKey = lKey;
 });
 
@@ -1982,16 +2169,9 @@ ctxMenu?.addEventListener('click', (event) => {
     cmdline.addHistory(`すべて選択: ${shapes.length}個`, '#8aa8c0');
     redraw();
   } else if (action === 'copy') {
-    const t = shapes.find((s) => s.id === selectedId);
-    if (t) { clipboard = shapeClone(t); cmdline.addHistory('コピー', '#8aa8c0'); }
+    if (copySelectionToClipboard()) cmdline.addHistory('コピー', '#8aa8c0');
   } else if (action === 'paste') {
-    if (clipboard) {
-      const pasted = cloneWithOffset(clipboard, 10, 10);
-      shapes.push(pasted);
-      selectedId = pasted.id;
-      saveHistory();
-      redraw();
-    }
+    pasteClipboard();
   } else if (action === 'delete') {
     deleteSelected();
     cmdline.addHistory('削除', '#8aa8c0');

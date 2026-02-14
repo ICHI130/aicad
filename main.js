@@ -131,8 +131,23 @@ ipcMain.handle('ai:set-gemini-api-key', (_event, apiKey) => {
   return { ok: true, configured: Boolean(geminiApiKey) };
 });
 
+
+function isPdfReference(referenceImage) {
+  const mime = String(referenceImage?.mimeType || '').toLowerCase();
+  return mime === 'application/pdf' || String(referenceImage?.name || '').toLowerCase().endsWith('.pdf');
+}
+
+function buildPromptText(message, drawing, hasAttachment = false) {
+  const attachmentNote = hasAttachment
+    ? '\n\n添付資料を参照し、図面へ反映可能な差分があれば ```json で {"action":"draw","shapes":[...]} を返してください。'
+    : '';
+  return `図面コンテキスト: ${JSON.stringify(drawing)}\n\n質問: ${message}${attachmentNote}`;
+}
+
 ipcMain.handle('ai:ask', async (_event, payload) => {
   const { provider, message, drawing, referenceImage } = payload ?? {};
+  const hasAttachment = Boolean(referenceImage?.dataBase64);
+  const attachedPdf = isPdfReference(referenceImage);
 
   if (!message || typeof message !== 'string') {
     throw new Error('メッセージが空です。');
@@ -158,8 +173,10 @@ ipcMain.handle('ai:ask', async (_event, payload) => {
     }
 
     const data = await response.json();
-    const addon = referenceImage
-      ? '\n\n[補足] Ollamaは現在テキストモデルで実行中のため、画像はメタ情報のみ参照しています。'
+    const addon = hasAttachment
+      ? attachedPdf
+        ? '\n\n[補足] Ollamaは添付PDFを直接解析できないため、メタ情報のみ参照しています。Claude/Gemini推奨。'
+        : '\n\n[補足] Ollamaは現在テキストモデルで実行中のため、画像はメタ情報のみ参照しています。'
       : '';
     return { provider, type: 'text', text: (data.response || '(応答なし)') + addon };
   }
@@ -182,25 +199,34 @@ ipcMain.handle('ai:ask', async (_event, payload) => {
         messages: [
           {
             role: 'user',
-            content: referenceImage?.dataBase64
+            content: hasAttachment
               ? [
-                  {
-                    type: 'image',
-                    source: {
-                      type: 'base64',
-                      media_type: referenceImage.mimeType || 'image/jpeg',
-                      data: referenceImage.dataBase64,
-                    },
-                  },
+                  ...(attachedPdf
+                    ? [{
+                        type: 'document',
+                        source: {
+                          type: 'base64',
+                          media_type: 'application/pdf',
+                          data: referenceImage.dataBase64,
+                        },
+                      }]
+                    : [{
+                        type: 'image',
+                        source: {
+                          type: 'base64',
+                          media_type: referenceImage.mimeType || 'image/jpeg',
+                          data: referenceImage.dataBase64,
+                        },
+                      }]),
                   {
                     type: 'text',
-                    text: `図面コンテキスト: ${JSON.stringify(drawing)}\n\n質問: ${message}\n\n添付画像を現調写真として参照し、簡易作図できるJSON案があれば \`\`\`json ブロックで返してください。`,
+                    text: buildPromptText(message, drawing, true),
                   },
                 ]
               : [
                   {
                     type: 'text',
-                    text: `図面コンテキスト: ${JSON.stringify(drawing)}\n\n質問: ${message}`,
+                    text: buildPromptText(message, drawing, false),
                   },
                 ],
           },
@@ -225,12 +251,15 @@ ipcMain.handle('ai:ask', async (_event, payload) => {
     }
 
     const content = [];
-    if (referenceImage?.dataBase64) {
+    if (hasAttachment && attachedPdf) {
+      throw new Error('OpenAIプロバイダでのPDFチェックバックは未対応です。画像添付またはClaude/Geminiを使用してください。');
+    }
+    if (hasAttachment) {
       content.push({ type: 'input_image', image_url: `data:${referenceImage.mimeType || 'image/jpeg'};base64,${referenceImage.dataBase64}` });
     }
     content.push({
       type: 'input_text',
-      text: `図面コンテキスト: ${JSON.stringify(drawing)}\n\n質問: ${message}`,
+      text: buildPromptText(message, drawing, hasAttachment),
     });
 
     const response = await fetch('https://api.openai.com/v1/responses', {
@@ -262,9 +291,9 @@ ipcMain.handle('ai:ask', async (_event, payload) => {
       throw new Error('Gemini APIキーが未設定です。');
     }
 
-    const parts = [{ text: `図面コンテキスト: ${JSON.stringify(drawing)}\n\n質問: ${message}` }];
-    if (referenceImage?.dataBase64) {
-      parts.unshift({ inline_data: { mime_type: referenceImage.mimeType || 'image/jpeg', data: referenceImage.dataBase64 } });
+    const parts = [{ text: buildPromptText(message, drawing, hasAttachment) }];
+    if (hasAttachment) {
+      parts.unshift({ inline_data: { mime_type: attachedPdf ? 'application/pdf' : (referenceImage.mimeType || 'image/jpeg'), data: referenceImage.dataBase64 } });
     }
 
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`, {

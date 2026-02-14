@@ -1,6 +1,6 @@
 import { askAi, saveClaudeApiKey, saveOpenAiApiKey, saveGeminiApiKey } from '../ai/bridge.js';
 
-const MAX_IMAGE_SIZE = 8 * 1024 * 1024;
+const MAX_REFERENCE_SIZE = 15 * 1024 * 1024;
 
 function appendMessage(role, text) {
   const log = document.getElementById('chat-log');
@@ -19,9 +19,19 @@ function fileToBase64(file) {
       const base64 = result.includes(',') ? result.split(',')[1] : '';
       resolve(base64);
     };
-    reader.onerror = () => reject(new Error('画像の読み込みに失敗しました。'));
+    reader.onerror = () => reject(new Error('資料の読み込みに失敗しました。'));
     reader.readAsDataURL(file);
   });
+}
+
+function buildCheckbackPrompt() {
+  return [
+    '添付のチェックバック資料（赤入れ・青入れ）を読み取り、現在図面へ反映する差分を提案してください。',
+    '必ず ```json ブロックで {"action":"draw","shapes":[...]} を返してください。',
+    'shape は line / rect / circle / arc / text / point / dim / hatch のみ使用してください。',
+    '寸法・注記の修正指示があれば text または dim で反映案を出してください。',
+    '座標系は既存図面コンテキスト(mm)に合わせ、過剰な説明文は短くしてください。',
+  ].join('\n');
 }
 
 export function initSidebar({ getDrawingContext, onAiResponse }) {
@@ -31,6 +41,7 @@ export function initSidebar({ getDrawingContext, onAiResponse }) {
   const imagePreview = document.getElementById('image-ref-preview');
   const imageMeta = document.getElementById('image-ref-meta');
   const imageClear = document.getElementById('image-ref-clear');
+  const applyCheckback = document.getElementById('apply-checkback');
 
   let referenceImage = null;
 
@@ -41,7 +52,7 @@ export function initSidebar({ getDrawingContext, onAiResponse }) {
       imagePreview.src = '';
       imagePreview.style.display = 'none';
     }
-    if (imageMeta) imageMeta.textContent = '写真参照: なし';
+    if (imageMeta) imageMeta.textContent = 'チェックバック資料: なし';
   }
 
   imageInput?.addEventListener('change', async () => {
@@ -50,25 +61,33 @@ export function initSidebar({ getDrawingContext, onAiResponse }) {
       clearReferenceImage();
       return;
     }
-    if (!file.type.startsWith('image/')) {
-      appendMessage('ai', '画像ファイル（jpg/png/webp など）を選択してください。');
+
+    const isImage = file.type.startsWith('image/');
+    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+    if (!isImage && !isPdf) {
+      appendMessage('ai', '画像またはPDFファイルを選択してください。');
       clearReferenceImage();
       return;
     }
-    if (file.size > MAX_IMAGE_SIZE) {
-      appendMessage('ai', '画像サイズが大きすぎます（8MB以下）。');
+    if (file.size > MAX_REFERENCE_SIZE) {
+      appendMessage('ai', '資料サイズが大きすぎます（15MB以下）。');
       clearReferenceImage();
       return;
     }
 
     try {
       const dataBase64 = await fileToBase64(file);
-      referenceImage = { name: file.name, mimeType: file.type, dataBase64 };
+      referenceImage = { name: file.name, mimeType: isPdf ? 'application/pdf' : file.type, dataBase64 };
+      if (imageMeta) imageMeta.textContent = `チェックバック資料: ${file.name} (${Math.round(file.size / 1024)} KB)`;
       if (imagePreview) {
-        imagePreview.src = `data:${file.type};base64,${dataBase64}`;
-        imagePreview.style.display = 'block';
+        if (isImage) {
+          imagePreview.src = `data:${file.type};base64,${dataBase64}`;
+          imagePreview.style.display = 'block';
+        } else {
+          imagePreview.src = '';
+          imagePreview.style.display = 'none';
+        }
       }
-      if (imageMeta) imageMeta.textContent = `写真参照: ${file.name} (${Math.round(file.size / 1024)} KB)`;
     } catch (error) {
       appendMessage('ai', error.message);
       clearReferenceImage();
@@ -95,6 +114,15 @@ export function initSidebar({ getDrawingContext, onAiResponse }) {
     appendMessage('ai', result.configured ? 'Gemini APIキーを保存しました。' : 'Gemini APIキーをクリアしました。');
   });
 
+  async function runAi(message) {
+    const result = await askAi(provider.value, message, getDrawingContext(), { referenceImage });
+    const text = result?.text || '(応答なし)';
+    appendMessage('ai', text);
+    if (onAiResponse && text) {
+      onAiResponse({ type: result?.type || 'text', text });
+    }
+  }
+
   async function sendMessage() {
     const message = chatInput.value.trim();
     if (!message) return;
@@ -102,16 +130,25 @@ export function initSidebar({ getDrawingContext, onAiResponse }) {
     appendMessage('user', message);
 
     try {
-      const result = await askAi(provider.value, message, getDrawingContext(), { referenceImage });
-      const text = result?.text || '(応答なし)';
-      appendMessage('ai', text);
-      if (onAiResponse && text) {
-        onAiResponse({ type: result?.type || 'text', text });
-      }
+      await runAi(message);
     } catch (error) {
       appendMessage('ai', `エラー: ${error.message}`);
     }
   }
+
+  applyCheckback?.addEventListener('click', async () => {
+    if (!referenceImage) {
+      appendMessage('ai', '先にチェックバック資料（画像/PDF）を添付してください。');
+      return;
+    }
+    const message = buildCheckbackPrompt();
+    appendMessage('user', `チェックバック反映を実行: ${referenceImage.name}`);
+    try {
+      await runAi(message);
+    } catch (error) {
+      appendMessage('ai', `エラー: ${error.message}`);
+    }
+  });
 
   document.getElementById('send-chat').addEventListener('click', sendMessage);
 
