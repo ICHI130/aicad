@@ -27,7 +27,7 @@ function fileToBase64(file) {
 function buildCheckbackPrompt() {
   return [
     '添付のチェックバック資料（赤入れ・青入れ）を読み取り、現在図面へ反映する差分を提案してください。',
-    '必ず ```json ブロックで {"action":"draw","shapes":[...]} を返してください。',
+    '必ず ```json ブロックでコマンドを返してください。新規追加は {"action":"draw","shapes":[...]}、既存修正は {"action":"mutate","operations":[{"type":"update","id":"shape_xxx","patch":{...}}]} を使用してください。',
     'shape は line / rect / circle / arc / text / point / dim / hatch のみ使用してください。',
     '寸法・注記の修正指示があれば text または dim で反映案を出してください。',
     '座標系は既存図面コンテキスト(mm)に合わせ、過剰な説明文は短くしてください。',

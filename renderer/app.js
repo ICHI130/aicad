@@ -689,17 +689,17 @@ initSidebar({
   getDrawingContext() {
     const elements = shapes.map((s) => {
       const layer = getShapeLayerId(s);
-      if (s.type === 'line') return { type: 'line', x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2, layer };
-      if (s.type === 'arc') return { type: 'arc', cx: s.cx, cy: s.cy, r: s.r, startAngle: s.startAngle, endAngle: s.endAngle, layer };
-      if (s.type === 'circle') return { type: 'circle', cx: s.cx, cy: s.cy, r: s.r, layer };
-      if (s.type === 'ellipse') return { type: 'ellipse', cx: s.cx, cy: s.cy, rx: s.rx, ry: s.ry, rotation: s.rotation || 0, layer };
-      if (s.type === 'text') return { type: 'text', x: s.x, y: s.y, text: s.text, height: s.height, rotation: s.rotation, layer };
-      if (s.type === 'point') return { type: 'point', x: s.x, y: s.y, layer };
-      if (s.type === 'dim' && s.dimType === 'radius') return { type: 'dim', dimType: 'radius', cx: s.cx, cy: s.cy, r: s.r, px: s.px, py: s.py, layer };
-      if (s.type === 'dim' && s.dimType === 'diameter') return { type: 'dim', dimType: 'diameter', cx: s.cx, cy: s.cy, r: s.r, layer };
-      if (s.type === 'dim') return { type: 'dim', x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2, layer };
-      if (s.type === 'hatch') return { type: 'hatch', hatchKind: s.hatchKind, x: s.x, y: s.y, w: s.w, h: s.h, cx: s.cx, cy: s.cy, r: s.r, layer };
-      return { type: 'rect', x: s.x, y: s.y, w: s.w, h: s.h, layer };
+      if (s.type === 'line') return { id: s.id, type: 'line', x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2, layer };
+      if (s.type === 'arc') return { id: s.id, type: 'arc', cx: s.cx, cy: s.cy, r: s.r, startAngle: s.startAngle, endAngle: s.endAngle, layer };
+      if (s.type === 'circle') return { id: s.id, type: 'circle', cx: s.cx, cy: s.cy, r: s.r, layer };
+      if (s.type === 'ellipse') return { id: s.id, type: 'ellipse', cx: s.cx, cy: s.cy, rx: s.rx, ry: s.ry, rotation: s.rotation || 0, layer };
+      if (s.type === 'text') return { id: s.id, type: 'text', x: s.x, y: s.y, text: s.text, height: s.height, rotation: s.rotation, layer };
+      if (s.type === 'point') return { id: s.id, type: 'point', x: s.x, y: s.y, layer };
+      if (s.type === 'dim' && s.dimType === 'radius') return { id: s.id, type: 'dim', dimType: 'radius', cx: s.cx, cy: s.cy, r: s.r, px: s.px, py: s.py, layer };
+      if (s.type === 'dim' && s.dimType === 'diameter') return { id: s.id, type: 'dim', dimType: 'diameter', cx: s.cx, cy: s.cy, r: s.r, layer };
+      if (s.type === 'dim') return { id: s.id, type: 'dim', x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2, layer };
+      if (s.type === 'hatch') return { id: s.id, type: 'hatch', hatchKind: s.hatchKind, x: s.x, y: s.y, w: s.w, h: s.h, cx: s.cx, cy: s.cy, r: s.r, layer };
+      return { id: s.id, type: 'rect', x: s.x, y: s.y, w: s.w, h: s.h, layer };
     });
     return { layers: layers.map((layer) => ({ name: layer.name, visible: layer.visible, locked: layer.locked })), elements, selected: selectedId ? [selectedId] : [], bbox: computeBoundingBox(elements) };
   },
@@ -721,13 +721,53 @@ function executeAiDraw(text) {
     return;
   }
 
-  for (const s of parsed.command.shapes) {
-    shapes.push(assignCurrentLayer({ id: `shape_${crypto.randomUUID()}`, ...s }));
+  const command = parsed.command;
+
+  if (command.action === 'draw') {
+    for (const s of command.shapes) {
+      shapes.push(assignCurrentLayer({ id: `shape_${crypto.randomUUID()}`, ...s }));
+    }
+    saveHistory();
+    fitView();
+    redraw();
+    cmdline.addHistory(`AI作図: ${command.shapes.length}個の図形を追加`, '#4da6ff');
+    return;
   }
-  saveHistory();
-  fitView();
-  redraw();
-  cmdline.addHistory(`AI作図: ${parsed.command.shapes.length}個の図形を追加`, '#4da6ff');
+
+  if (command.action === 'mutate') {
+    let changed = 0;
+
+    for (const op of command.operations) {
+      if (op.type === 'add') {
+        shapes.push(assignCurrentLayer({ id: `shape_${crypto.randomUUID()}`, ...op.shape }));
+        changed += 1;
+        continue;
+      }
+
+      const targetIndex = shapes.findIndex((s) => s.id === op.id);
+      if (targetIndex < 0) continue;
+
+      if (op.type === 'delete') {
+        shapes.splice(targetIndex, 1);
+        changed += 1;
+      } else if (op.type === 'update') {
+        const current = shapes[targetIndex];
+        if (!current) continue;
+        const next = { ...current, ...op.patch, id: current.id, type: current.type };
+        shapes[targetIndex] = next;
+        changed += 1;
+      }
+    }
+
+    if (changed > 0) {
+      saveHistory();
+      fitView();
+      redraw();
+      cmdline.addHistory(`AI編集: ${changed}件の変更を適用`, '#4da6ff');
+    } else {
+      cmdline.addHistory('AI編集: 適用対象が見つかりませんでした', '#ffbb66');
+    }
+  }
 }
 
 // ──────────────────────────────────────────────

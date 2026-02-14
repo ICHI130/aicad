@@ -139,7 +139,7 @@ function isPdfReference(referenceImage) {
 
 function buildPromptText(message, drawing, hasAttachment = false) {
   const attachmentNote = hasAttachment
-    ? '\n\n添付資料を参照し、図面へ反映可能な差分があれば ```json で {"action":"draw","shapes":[...]} を返してください。'
+    ? '\n\n添付資料を参照し、図面へ反映可能な差分があれば ```json でコマンドを返してください。新規追加は {"action":"draw","shapes":[...]}、既存編集は {"action":"mutate","operations":[{"type":"update","id":"shape_xxx","patch":{...}}]} を使用してください。'
     : '';
   return `図面コンテキスト: ${JSON.stringify(drawing)}\n\n質問: ${message}${attachmentNote}`;
 }

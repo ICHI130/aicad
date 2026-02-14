@@ -77,6 +77,60 @@ function sanitizeShape(shape) {
   return { ok: true, shape: sanitized };
 }
 
+function sanitizeMutateOp(op) {
+  if (!op || typeof op !== 'object') return { ok: false, reason: 'operation must be object' };
+  const type = String(op.type || '').toLowerCase();
+  if (!['add', 'update', 'delete'].includes(type)) {
+    return { ok: false, reason: `unsupported operation type: ${op.type}` };
+  }
+
+  if (type === 'add') {
+    const result = sanitizeShape(op.shape);
+    if (!result.ok) return result;
+    return { ok: true, operation: { type: 'add', shape: result.shape } };
+  }
+
+  const id = String(op.id || '').trim();
+  if (!id) return { ok: false, reason: `${type} requires non-empty id` };
+
+  if (type === 'delete') {
+    return { ok: true, operation: { type: 'delete', id } };
+  }
+
+  const patch = op.patch;
+  if (!patch || typeof patch !== 'object') {
+    return { ok: false, reason: 'update requires patch object' };
+  }
+
+  return { ok: true, operation: { type: 'update', id, patch } };
+}
+
+function sanitizeMutateCommand(payload) {
+  if (!Array.isArray(payload.operations)) {
+    return { ok: false, reason: 'expected operations:[] for mutate action' };
+  }
+  if (payload.operations.length > 2000) {
+    return { ok: false, reason: 'operation count limit exceeded (2000)' };
+  }
+
+  const operations = [];
+  for (const op of payload.operations) {
+    const result = sanitizeMutateOp(op);
+    if (!result.ok) return result;
+    operations.push(result.operation);
+  }
+
+  return {
+    ok: true,
+    command: {
+      type: 'cad-command',
+      version: payload.version ?? 1,
+      action: 'mutate',
+      operations,
+    },
+  };
+}
+
 export function parseAiDrawCommand(rawText) {
   if (typeof rawText !== 'string' || !rawText.trim()) {
     return { ok: false, reason: 'empty response' };
@@ -92,8 +146,12 @@ export function parseAiDrawCommand(rawText) {
     return { ok: false, reason: `unsupported command version: ${version}` };
   }
 
+  if (payload.action === 'mutate') {
+    return sanitizeMutateCommand(payload);
+  }
+
   if (payload.action !== 'draw' || !Array.isArray(payload.shapes)) {
-    return { ok: false, reason: 'expected { action:"draw", shapes:[] }' };
+    return { ok: false, reason: 'expected { action:"draw", shapes:[] } or { action:"mutate", operations:[] }' };
   }
 
   if (payload.shapes.length > 5000) {
