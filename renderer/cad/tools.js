@@ -36,11 +36,18 @@ const COLOR_PREVIEW = '#ffff00';  // 黄色（作図中プレビュー)
 const COLOR_SELECT  = '#ff4444';  // 赤（選択中）
 
 export function buildShapeNode(shape, viewport, options = {}) {
-  const { isPreview = false, isSelected = false, layerStyle = null } = options;
+  const {
+    isPreview = false,
+    isSelected = false,
+    layerStyle = null,
+    plotStyle = 'screen',
+    lineweightScale = 1,
+  } = options;
 
-  const resolvedLinewidth = Number(shape.linewidth ?? layerStyle?.linewidth ?? 0.25);
+  const resolvedLinewidth = Number(shape.linewidth ?? layerStyle?.linewidth ?? 0.25) * Math.max(0.1, Number(lineweightScale) || 1);
   const sw = Math.max(1, resolvedLinewidth * viewport.scale);
-  const color = isPreview ? COLOR_PREVIEW : isSelected ? COLOR_SELECT : resolveShapeColor(shape, layerStyle);
+  const baseColor = isPreview ? COLOR_PREVIEW : isSelected ? COLOR_SELECT : resolveShapeColor(shape, layerStyle);
+  const color = plotStyle === 'monochrome' ? toMonochrome(baseColor) : baseColor;
   const linetype = shape.linetype || layerStyle?.linetype || 'CONTINUOUS';
   const dash = isPreview ? [8, 4] : getDashPattern(linetype, viewport.scale);
 
@@ -344,6 +351,24 @@ export function buildShapeNode(shape, viewport, options = {}) {
     id: shape.id,
     listening: !isPreview,
   });
+}
+
+function toMonochrome(color) {
+  const hex = String(color || '').trim();
+  if (/^#([0-9a-f]{3})$/i.test(hex)) {
+    const [, short] = /^#([0-9a-f]{3})$/i.exec(hex);
+    const full = short.split('').map((ch) => ch + ch).join('');
+    return toMonochrome(`#${full}`);
+  }
+  if (/^#([0-9a-f]{6})$/i.test(hex)) {
+    const [, value] = /^#([0-9a-f]{6})$/i.exec(hex);
+    const r = parseInt(value.slice(0, 2), 16);
+    const g = parseInt(value.slice(2, 4), 16);
+    const b = parseInt(value.slice(4, 6), 16);
+    const gray = Math.round(r * 0.299 + g * 0.587 + b * 0.114).toString(16).padStart(2, '0');
+    return `#${gray}${gray}${gray}`;
+  }
+  return '#111111';
 }
 
 function normalizeArcAngle(startAngle, endAngle) {

@@ -226,6 +226,10 @@ let middleDownTime = 0;
 // グリップ編集状態
 let gripState = null; // { shapeId, gripIndex } or null
 
+const PLOT_SETTINGS_KEY = 'aicad:plot-settings:v1';
+let plotSettings = { paperSize: 'A4', landscape: true, style: 'monochrome', lineweightScale: 1 };
+let plotPreviewActive = false;
+
 const history = [];
 let historyIndex = -1;
 const auditTrail = [];
@@ -233,6 +237,47 @@ const MAX_AUDIT = 120;
 const MAX_HISTORY = 50;
 
 
+
+
+function loadPlotSettings() {
+  const paperSize = document.getElementById('plot-paper-size');
+  const orientation = document.getElementById('plot-orientation');
+  const style = document.getElementById('plot-style');
+  const lwScale = document.getElementById('plot-lineweight-scale');
+  if (!paperSize || !orientation || !style || !lwScale) return;
+
+  try {
+    const saved = JSON.parse(localStorage.getItem(PLOT_SETTINGS_KEY) || '{}');
+    plotSettings = {
+      paperSize: saved.paperSize || plotSettings.paperSize,
+      landscape: typeof saved.landscape === 'boolean' ? saved.landscape : plotSettings.landscape,
+      style: saved.style || plotSettings.style,
+      lineweightScale: Math.max(0.1, Number(saved.lineweightScale) || plotSettings.lineweightScale),
+    };
+  } catch {
+    // noop
+  }
+
+  paperSize.value = plotSettings.paperSize;
+  orientation.value = plotSettings.landscape ? 'landscape' : 'portrait';
+  style.value = plotSettings.style;
+  lwScale.value = String(plotSettings.lineweightScale);
+
+  const apply = () => {
+    plotSettings = {
+      paperSize: paperSize.value || 'A4',
+      landscape: orientation.value === 'landscape',
+      style: style.value || 'monochrome',
+      lineweightScale: Math.max(0.1, Number(lwScale.value) || 1),
+    };
+    localStorage.setItem(PLOT_SETTINGS_KEY, JSON.stringify(plotSettings));
+  };
+
+  paperSize.addEventListener('change', apply);
+  orientation.addEventListener('change', apply);
+  style.addEventListener('change', apply);
+  lwScale.addEventListener('change', apply);
+}
 
 function initDimStyleControls() {
   const textHeight = document.getElementById('dim-text-height');
@@ -684,6 +729,7 @@ const cmdline = initCommandLine({
 cmdline.setActiveTool(tool);
 
 initDimStyleControls();
+loadPlotSettings();
 
 initSidebar({
   getDrawingContext() {
@@ -1457,7 +1503,12 @@ function redraw() {
     if (!isLayerVisible(shape)) continue;
     const isSelected = shape.id === selectedId || selectedIds.has(shape.id);
     const layer = getLayer(getShapeLayerId(shape));
-    drawingLayer.add(buildShapeNode(shape, viewport, { isSelected, layerStyle: layer }));
+    drawingLayer.add(buildShapeNode(shape, viewport, {
+      isSelected,
+      layerStyle: layer,
+      plotStyle: plotPreviewActive ? plotSettings.style : 'screen',
+      lineweightScale: plotPreviewActive ? plotSettings.lineweightScale : 1,
+    }));
   }
   if (previewShape) drawingLayer.add(buildShapeNode(previewShape, viewport, { isPreview: true }));
   drawingLayer.draw();
@@ -1924,12 +1975,21 @@ function cloneWithOffset(shape, dx, dy) {
 
 async function printCurrentViewAsPdf() {
   if (!window.cadBridge?.printPdf) return;
-  const landscape = window.confirm('印刷方向を選択してください。OK=横向き / Cancel=縦向き');
+  plotPreviewActive = true;
+  redraw();
   try {
-    const result = await window.cadBridge.printPdf({ landscape });
-    if (!result?.canceled) cmdline.addHistory(`PDF保存: ${result.filePath}`, '#4da6ff');
+    const result = await window.cadBridge.printPdf({
+      landscape: plotSettings.landscape,
+      paperSize: plotSettings.paperSize,
+    });
+    if (!result?.canceled) {
+      cmdline.addHistory(`PDF保存: ${result.filePath} (${plotSettings.paperSize}, ${plotSettings.style})`, '#4da6ff');
+    }
   } catch (error) {
     cmdline.addHistory(`印刷エラー: ${error.message}`, '#ff6666');
+  } finally {
+    plotPreviewActive = false;
+    redraw();
   }
 }
 
