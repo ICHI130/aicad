@@ -226,6 +226,8 @@ let gripState = null; // { shapeId, gripIndex } or null
 
 const history = [];
 let historyIndex = -1;
+const auditTrail = [];
+const MAX_AUDIT = 120;
 const MAX_HISTORY = 50;
 
 
@@ -307,10 +309,83 @@ function assignCurrentLayer(shape) {
 // 履歴管理
 // ──────────────────────────────────────────────
 function saveHistory() {
+  const prev = history[historyIndex] || [];
+  const next = JSON.parse(JSON.stringify(shapes));
+  pushAuditEntry(prev, next);
   history.splice(historyIndex + 1);
-  history.push(JSON.parse(JSON.stringify(shapes)));
+  history.push(next);
   if (history.length > MAX_HISTORY) history.shift();
   historyIndex = history.length - 1;
+}
+
+function pushAuditEntry(prevShapes, nextShapes) {
+  const diff = buildShapeDiff(prevShapes, nextShapes);
+  if (!diff.added && !diff.removed && !diff.changed) return;
+  auditTrail.push({
+    ts: new Date().toISOString(),
+    ...diff,
+  });
+  if (auditTrail.length > MAX_AUDIT) auditTrail.shift();
+}
+
+function buildShapeDiff(prevShapes, nextShapes) {
+  const prevById = new Map(prevShapes.map((shape) => [shape.id, shape]));
+  const nextById = new Map(nextShapes.map((shape) => [shape.id, shape]));
+  let added = 0;
+  let removed = 0;
+  let changed = 0;
+  const types = {};
+
+  for (const shape of nextShapes) {
+    if (!prevById.has(shape.id)) {
+      added += 1;
+      types[shape.type] = (types[shape.type] || 0) + 1;
+      continue;
+    }
+    const prev = prevById.get(shape.id);
+    if (JSON.stringify(prev) !== JSON.stringify(shape)) {
+      changed += 1;
+      types[shape.type] = (types[shape.type] || 0) + 1;
+    }
+  }
+
+  for (const shape of prevShapes) {
+    if (!nextById.has(shape.id)) {
+      removed += 1;
+      types[shape.type] = (types[shape.type] || 0) + 1;
+    }
+  }
+
+  const changedByType = Object.entries(types)
+    .sort((a, b) => b[1] - a[1])
+    .map(([type, count]) => `${type}:${count}`)
+    .join(', ');
+
+  return { added, removed, changed, changedByType };
+}
+
+function showAuditTrail() {
+  if (!auditTrail.length) {
+    cmdline.addHistory('監査ログ: 変更履歴はまだありません', '#8aa8c0');
+    return;
+  }
+  cmdline.addHistory('監査ログ（新しい順）', '#8aa8c0');
+  const recent = auditTrail.slice(-5).reverse();
+  for (const entry of recent) {
+    const time = entry.ts.slice(11, 19);
+    cmdline.addHistory(`${time} +${entry.added} / -${entry.removed} / ~${entry.changed} [${entry.changedByType || 'n/a'}]`, '#8aa8c0');
+  }
+}
+
+function showLastHistoryDiff() {
+  if (historyIndex <= 0) {
+    cmdline.addHistory('直前差分: 比較対象がありません', '#8aa8c0');
+    return;
+  }
+  const prev = history[historyIndex - 1] || [];
+  const curr = history[historyIndex] || [];
+  const diff = buildShapeDiff(prev, curr);
+  cmdline.addHistory(`直前差分 +${diff.added} / -${diff.removed} / ~${diff.changed} [${diff.changedByType || 'n/a'}]`, '#8aa8c0');
 }
 
 function undo() {
@@ -533,6 +608,8 @@ const cmdline = initCommandLine({
     else if (cmd === 'zoomAll') fitView();
     else if (cmd === 'erase') deleteSelected();
     else if (cmd === 'print') printCurrentViewAsPdf();
+    else if (cmd === 'audit') showAuditTrail();
+    else if (cmd === 'compare') showLastHistoryDiff();
   },
 });
 
@@ -1641,6 +1718,23 @@ function finishPolyline(closeLoop = false) {
   cmdline.addHistory(`ポリライン確定 (${points.length - 1}本)`, '#4da6ff');
 }
 
+function undoPolylineVertex() {
+  if (!polylinePoints.length) return false;
+  polylinePoints.pop();
+  previewShape = null;
+  redraw();
+
+  if (polylinePoints.length === 0) {
+    statusbar.setGuide(tool, 0);
+    cmdline.addHistory('ポリライン: 始点を取り消しました', '#8aa8c0');
+    return true;
+  }
+
+  statusbar.setGuide(tool, 1);
+  cmdline.addHistory(`ポリライン: 頂点を取り消し (${polylinePoints.length}点)`, '#8aa8c0');
+  return true;
+}
+
 function cloneWithOffset(shape, dx, dy) {
   const c = shapeClone(shape);
   c.id = `shape_${crypto.randomUUID()}`;
@@ -2655,6 +2749,13 @@ document.addEventListener('keydown', (event) => {
 
   // Escape
   if (key === 'Escape') { oneShotSnapMode = null; hideShiftRightSnapMenu(); escapeCurrentTool(); return; }
+
+  // Backspace（ポリラインの直前頂点取り消し）
+  if (key === 'Backspace' && tool === Tool.POLYLINE) {
+    event.preventDefault();
+    undoPolylineVertex();
+    return;
+  }
 
   // Delete
   if (key === 'Delete' && (selectedId || selectedIds.size > 0)) {
