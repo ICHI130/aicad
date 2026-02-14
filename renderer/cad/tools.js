@@ -8,7 +8,13 @@ export const Tool = {
   POLYLINE: 'polyline',
   DIM: 'dim',
   MOVE: 'move',
+  COPY: 'copy',
   ROTATE: 'rotate',
+  OFFSET: 'offset',
+  MIRROR: 'mirror',
+  TRIM: 'trim',
+  FILLET: 'fillet',
+  TEXT: 'text',
 };
 
 // AutoCAD風カラー
