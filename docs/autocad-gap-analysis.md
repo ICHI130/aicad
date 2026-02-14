@@ -4,6 +4,8 @@
 
 ---
 
+> 補足: 本差分は `autocad標準教科書.pdf` / `autocad応用教科書.pdf` の学習項目と合わせて運用する想定です。実装優先度の最新版は `docs/autocad-textbook-integration-plan.md` を参照してください。
+
 ## 1) Home（作図・修正）で不足しやすい上位機能
 
 > 既存の基本作図（Line/Rect/Circle/Arc/Polyline）・一部修正（Move/Copy/Rotate/Mirror/Trim/Extend/Fillet/Array/Offset）は実装済み。
