@@ -9,8 +9,10 @@ import { initSidebar } from './ui/sidebar.js';
 import { initCommandLine } from './ui/commandline.js';
 import { parseAiDrawCommand } from './ai/commandSchema.js';
 import { buildPreviewShape } from './cad/interaction.js';
+import { DEFAULT_LAYER_COLOR } from './cad/colors.js';
 import { initLayerPanel } from './ui/layerpanel.js';
 import { initI18n } from './ui/i18n.js';
+import { initPropertyPanel } from './ui/propertypanel.js';
 
 // ──────────────────────────────────────────────
 // DXF デコード（CP932 対応）
@@ -62,6 +64,16 @@ function handleCoordInput(str, currentPoint, prevPoint) {
     return { x: currentPoint.x + num, y: currentPoint.y };
   }
   return null;
+}
+
+
+function parseRectSizeInput(str, start) {
+  const match = str.trim().match(/^@([\-\d.]+),([\-\d.]+)$/);
+  if (!match || !start) return null;
+  const w = parseFloat(match[1]);
+  const h = parseFloat(match[2]);
+  if (!Number.isFinite(w) || !Number.isFinite(h)) return null;
+  return { x: start.x + w, y: start.y + h };
 }
 
 // ──────────────────────────────────────────────
@@ -145,7 +157,7 @@ const { stage, gridLayer, drawingLayer, snapLayer } = createKonvaCanvas(containe
 
 const viewport = { x: 0, y: 0, scale: 1 };
 const shapes = [];
-const layers = [{ id: 'default', name: 'default', visible: true, locked: false }];
+const layers = [{ id: 'default', name: 'default', visible: true, locked: false, color: DEFAULT_LAYER_COLOR, linetype: 'CONTINUOUS', linewidth: 0.25 }];
 let currentLayerId = 'default';
 
 let tool = Tool.SELECT;
@@ -209,7 +221,7 @@ function ensureLayer(layerId, name = layerId) {
   const id = normalizeLayerId(layerId) || 'default';
   let layer = getLayer(id);
   if (!layer) {
-    layer = { id, name: String(name || id), visible: true, locked: false };
+    layer = { id, name: String(name || id), visible: true, locked: false, color: DEFAULT_LAYER_COLOR, linetype: 'CONTINUOUS', linewidth: 0.25 };
     layers.push(layer);
   }
   return layer;
@@ -351,6 +363,25 @@ const toolbar = initToolbar({
 toolbar.setActive(tool);
 
 
+
+const propertyPanel = initPropertyPanel({
+  getSelection() {
+    const ids = selectedId ? [selectedId] : [...selectedIds];
+    return shapes.filter((shape) => ids.includes(shape.id));
+  },
+  getLayers: () => layers,
+  onApply(ids, patch) {
+    for (const shape of shapes) {
+      if (!ids.includes(shape.id)) continue;
+      Object.assign(shape, patch);
+      ensureLayer(shape.layerId || currentLayerId, shape.layerId || currentLayerId);
+    }
+    saveHistory();
+    redraw();
+    propertyPanel.refresh();
+  },
+});
+
 const layerPanel = initLayerPanel({
   getLayers: () => layers,
   getCurrentLayerId: () => currentLayerId,
@@ -381,6 +412,20 @@ const layerPanel = initLayerPanel({
     const layer = getLayer(layerId);
     if (!layer) return;
     layer.locked = !layer.locked;
+    redraw();
+    layerPanel.refresh();
+  },
+  onUpdateLayerColor(layerId, color) {
+    const layer = getLayer(layerId);
+    if (!layer) return;
+    layer.color = color;
+    redraw();
+    layerPanel.refresh();
+  },
+  onUpdateLayerLinetype(layerId, linetype) {
+    const layer = getLayer(layerId);
+    if (!layer) return;
+    layer.linetype = linetype;
     redraw();
     layerPanel.refresh();
   },
@@ -996,11 +1041,13 @@ function redraw() {
   for (const shape of shapes) {
     if (!isLayerVisible(shape)) continue;
     const isSelected = shape.id === selectedId || selectedIds.has(shape.id);
-    drawingLayer.add(buildShapeNode(shape, viewport, { isSelected }));
+    const layer = getLayer(getShapeLayerId(shape));
+    drawingLayer.add(buildShapeNode(shape, viewport, { isSelected, layerStyle: layer }));
   }
   if (previewShape) drawingLayer.add(buildShapeNode(previewShape, viewport, { isPreview: true }));
   drawingLayer.draw();
   redrawSnapMarker();
+  propertyPanel.refresh();
 }
 
 // ──────────────────────────────────────────────
@@ -1075,7 +1122,8 @@ function handleCmdlineCoord(str) {
       drawingStart = pt;
       statusbar.setGuide(tool, 1);
     } else {
-      const pt = handleCoordInput(str, drawingStart, null);
+      const sizePt = parseRectSizeInput(str, drawingStart);
+      const pt = sizePt || handleCoordInput(str, drawingStart, null);
       if (!pt) return;
       const rect = normalizeRect(drawingStart, pt);
       if (rect.w > 0 && rect.h > 0) {
