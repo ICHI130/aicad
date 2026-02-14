@@ -29,6 +29,7 @@ export const Tool = {
   ARRAY: 'array',
   HATCH: 'hatch',
   TEXT: 'text',
+  MLEADER: 'mleader',
 };
 
 const COLOR_PREVIEW = '#ffff00';  // 黄色（作図中プレビュー)
@@ -292,6 +293,42 @@ export function buildShapeNode(shape, viewport, options = {}) {
       id: shape.id,
       listening: !isPreview,
     });
+  }
+
+  if (shape.type === 'mleader') {
+    const style = getDimStyle();
+    const group = new Konva.Group({ id: shape.id, listening: !isPreview });
+    const p1 = mmToScreen({ x: shape.x1, y: shape.y1 }, viewport);
+    const p2 = mmToScreen({ x: shape.x2, y: shape.y2 }, viewport);
+    const p3 = mmToScreen({ x: shape.x3, y: shape.y3 }, viewport);
+    const textHeight = Math.max(8, (shape.textHeight || style.textHeight) * viewport.scale);
+
+    group.add(new Konva.Arrow({
+      points: [p2.x, p2.y, p1.x, p1.y],
+      stroke: color,
+      fill: color,
+      strokeWidth: sw,
+      pointerLength: Math.max(4, style.arrowSize * viewport.scale),
+      pointerWidth: Math.max(3, style.arrowSize * viewport.scale * 0.75),
+    }));
+
+    group.add(new Konva.Line({
+      points: [p2.x, p2.y, p3.x, p3.y],
+      stroke: color,
+      strokeWidth: sw,
+      dash,
+    }));
+
+    group.add(new Konva.Text({
+      x: p3.x + 4,
+      y: p3.y - textHeight,
+      text: shape.text || '注記',
+      fontSize: textHeight,
+      fill: color,
+      fontFamily: 'MS Gothic, IPAGothic, sans-serif',
+    }));
+
+    return group;
   }
 
   // rect

@@ -181,6 +181,7 @@ let arcState = { p1: null, p2: null };
 let ellipseState = { center: null, rx: null };
 let arrayState = { base: null, source: null, count: 4 };
 let dimState = { p1: null, p2: null, circle: null, mode: 'linear' };
+let mleaderState = { p1: null, p2: null, text: '' };
 let latestSnap = { x: 0, y: 0, type: 'grid' };
 let lastNonSelectTool = Tool.LINE;
 
@@ -490,6 +491,7 @@ function changeTool(nextTool) {
   ellipseState = { center: null, rx: null };
   arrayState = { base: null, source: null, count: 4 };
   dimState = { p1: null, p2: null, circle: null, mode: 'linear' };
+  mleaderState = { p1: null, p2: null, text: '' };
   ellipseState = { center: null, rx: null };
   offsetState = { dist: null, base: null };
   mirrorState = { p1: null };
@@ -859,6 +861,12 @@ function pickShape(mmPoint) {
       if (Math.abs(nx * nx + ny * ny - 1) <= 0.12) return s;
       continue;
     }
+    if (s.type === 'mleader') {
+      const d1 = distancePointToSegment(mmPoint, { x: s.x1, y: s.y1 }, { x: s.x2, y: s.y2 });
+      const d2 = distancePointToSegment(mmPoint, { x: s.x2, y: s.y2 }, { x: s.x3, y: s.y3 });
+      if (Math.min(d1, d2) <= threshold) return s;
+      continue;
+    }
     if (s.type === 'text') {
       const approxW = s.text.length * (s.height || 2.5) * 0.7;
       if (mmPoint.x >= s.x - threshold && mmPoint.x <= s.x + approxW + threshold && mmPoint.y >= s.y - (s.height || 2.5) - threshold && mmPoint.y <= s.y + threshold) return s;
@@ -1056,6 +1064,12 @@ function applyMove(shape, dx, dy) {
     return;
   }
   if (shape.type === 'arc' || shape.type === 'circle' || shape.type === 'ellipse') { shape.cx += dx; shape.cy += dy; return; }
+  if (shape.type === 'mleader') {
+    shape.x1 += dx; shape.y1 += dy;
+    shape.x2 += dx; shape.y2 += dy;
+    shape.x3 += dx; shape.y3 += dy;
+    return;
+  }
   if (shape.type === 'text' || shape.type === 'point') { shape.x += dx; shape.y += dy; return; }
   if (shape.type === 'hatch') {
     if (shape.hatchKind === 'circle') { shape.cx += dx; shape.cy += dy; }
@@ -1348,6 +1362,7 @@ function fitView(targetShapes) {
       else { xs.push(s.x, s.x + s.w); ys.push(s.y, s.y + s.h); }
     }
     else if (s.type === 'text' || s.type === 'point') { xs.push(s.x); ys.push(s.y); }
+    else if (s.type === 'mleader') { xs.push(s.x1, s.x2, s.x3); ys.push(s.y1, s.y2, s.y3); }
   }
   if (!xs.length) return;
   const minX = Math.min(...xs), maxX = Math.max(...xs);
@@ -1426,6 +1441,7 @@ function escapeCurrentTool() {
   ellipseState = { center: null, rx: null };
   arrayState = { base: null, source: null, count: 4 };
   dimState = { p1: null, p2: null, circle: null, mode: 'linear' };
+  mleaderState = { p1: null, p2: null, text: '' };
   offsetState = { dist: null, base: null };
   mirrorState = { p1: null };
   trimState = { boundaries: [], phase: 0 };
@@ -1955,6 +1971,7 @@ stage.on('mousemove', () => {
     point: mm,
     polylinePoints,
     dimState,
+    mleaderState,
     arcState,
     ellipseState,
     arrayState,
@@ -2194,6 +2211,37 @@ stage.on('mousedown', (event) => {
     shapes.push(assignCurrentLayer({ id: `shape_${crypto.randomUUID()}`, type: 'dim', x1: dimState.p1.x, y1: dimState.p1.y, x2: dimState.p2.x, y2: dimState.p2.y, offset, dir }));
     dimState = { p1: null, p2: null, circle: null, mode: 'linear' }; previewShape = null;
     saveHistory(); redraw();
+    return;
+  }
+
+  if (tool === Tool.MLEADER) {
+    if (!mleaderState.p1) {
+      mleaderState.p1 = mm;
+      statusbar.setGuide(tool, 1);
+      return;
+    }
+    if (!mleaderState.p2) {
+      mleaderState.p2 = mm;
+      statusbar.setGuide(tool, 2);
+      return;
+    }
+    const text = window.prompt('引出線テキストを入力', mleaderState.text || '注記') || '注記';
+    shapes.push(assignCurrentLayer({
+      id: `shape_${crypto.randomUUID()}`,
+      type: 'mleader',
+      x1: mleaderState.p1.x,
+      y1: mleaderState.p1.y,
+      x2: mleaderState.p2.x,
+      y2: mleaderState.p2.y,
+      x3: mm.x,
+      y3: mm.y,
+      text,
+      textHeight: getDimStyle().textHeight,
+    }));
+    mleaderState = { p1: null, p2: null, text: '' };
+    previewShape = null;
+    saveHistory();
+    redraw();
     return;
   }
 
@@ -2929,6 +2977,7 @@ document.addEventListener('keydown', (event) => {
   if (chord === 'sc') { changeTool(Tool.SCALE); document._lastKey = ''; return; }
   if (chord === 'ar') { changeTool(Tool.ARRAY); document._lastKey = ''; return; }
   if (chord === 'di') { changeTool(Tool.DIM); document._lastKey = ''; return; }
+  if (chord === 'ml') { changeTool(Tool.MLEADER); document._lastKey = ''; return; }
   if (chord === 'co' && hasSelection) { changeTool(Tool.COPY); document._lastKey = ''; return; }
   if (chord === 'ro' && hasSelection) { changeTool(Tool.ROTATE); document._lastKey = ''; return; }
 
@@ -2959,6 +3008,7 @@ document.addEventListener('keydown', (event) => {
   if (lKey === 'a') { changeTool(Tool.ARC); return; }
   if (lKey === 'p') { changeTool(Tool.POLYLINE); return; }
   if (lKey === 'd') { changeTool(Tool.DIM); return; }
+  if (lKey === 'g') { changeTool(Tool.MLEADER); return; }
   if (lKey === 't') { changeTool(Tool.TEXT); return; }
   if (lKey === 'o') { changeTool(Tool.OFFSET); return; }
   if (lKey === 'h') { changeTool(Tool.HATCH); return; }
@@ -3153,6 +3203,26 @@ function shapeTouchesBbox(s, x0, y0, x1, y1) {
   }
   if (s.type === 'text' || s.type === 'point') {
     return s.x >= x0 && s.x <= x1 && s.y >= y0 && s.y <= y1;
+  }
+  if (s.type === 'mleader') {
+    const inBox = (px, py) => px >= x0 && px <= x1 && py >= y0 && py <= y1;
+    if (inBox(s.x1, s.y1) || inBox(s.x2, s.y2) || inBox(s.x3, s.y3)) return true;
+    const segs = [
+      [{ x: x0, y: y0 }, { x: x1, y: y0 }],
+      [{ x: x1, y: y0 }, { x: x1, y: y1 }],
+      [{ x: x1, y: y1 }, { x: x0, y: y1 }],
+      [{ x: x0, y: y1 }, { x: x0, y: y0 }],
+    ];
+    const legs = [
+      { x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2 },
+      { x1: s.x2, y1: s.y2, x2: s.x3, y2: s.y3 },
+    ];
+    for (const leg of legs) {
+      for (const [a, b] of segs) {
+        if (segmentsIntersect(leg, { x1: a.x, y1: a.y, x2: b.x, y2: b.y })) return true;
+      }
+    }
+    return false;
   }
   if (s.type === 'hatch') {
     if (s.hatchKind === 'circle') {
