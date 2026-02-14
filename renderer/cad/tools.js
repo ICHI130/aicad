@@ -14,6 +14,8 @@ export const Tool = {
   SCALE: 'scale',
   OFFSET: 'offset',
   MIRROR: 'mirror',
+  JOIN: 'join',
+  EXPLODE: 'explode',
   TRIM: 'trim',
   EXTEND: 'extend',
   FILLET: 'fillet',
