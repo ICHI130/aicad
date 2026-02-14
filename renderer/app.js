@@ -162,6 +162,7 @@ const shapes = [];
 const layers = [{ id: 'default', name: 'default', visible: true, locked: false, color: DEFAULT_LAYER_COLOR, linetype: 'CONTINUOUS', linewidth: 0.25 }];
 let currentLayerId = 'default';
 const LAYER_STATE_STORAGE_KEY = 'aicad:layer-state:v1';
+const NAMED_VIEWS_STORAGE_KEY = 'aicad:named-views:v1';
 
 let tool = Tool.SELECT;
 let drawingStart = null;
@@ -184,6 +185,7 @@ let dimState = { p1: null, p2: null, circle: null, mode: 'linear' };
 let mleaderState = { p1: null, p2: null, text: '' };
 let latestSnap = { x: 0, y: 0, type: 'grid' };
 let lastNonSelectTool = Tool.LINE;
+let namedViews = loadNamedViews();
 
 // オフセット状態
 let offsetState = { dist: null, base: null };
@@ -262,6 +264,51 @@ function initDimStyleControls() {
   arrowSize.addEventListener('input', apply);
   unit.addEventListener('change', apply);
   precision.addEventListener('change', apply);
+}
+
+function loadNamedViews() {
+  try {
+    const raw = localStorage.getItem(NAMED_VIEWS_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function persistNamedViews() {
+  try {
+    localStorage.setItem(NAMED_VIEWS_STORAGE_KEY, JSON.stringify(namedViews));
+  } catch {
+    // localStorage が使えない環境では保存をスキップ
+  }
+}
+
+function saveNamedView(name) {
+  if (!name) return false;
+  namedViews[name] = {
+    x: viewport.x,
+    y: viewport.y,
+    scale: viewport.scale,
+    savedAt: Date.now(),
+  };
+  persistNamedViews();
+  return true;
+}
+
+function restoreNamedView(name) {
+  const view = namedViews[name];
+  if (!view) return false;
+  viewport.x = Number(view.x) || 0;
+  viewport.y = Number(view.y) || 0;
+  viewport.scale = Math.max(0.001, Math.min(200, Number(view.scale) || 1));
+  redraw();
+  return true;
+}
+
+function listNamedViews() {
+  return Object.keys(namedViews).sort((a, b) => a.localeCompare(b));
 }
 
 function normalizeLayerId(raw) {
@@ -671,6 +718,30 @@ const cmdline = initCommandLine({
     return handleCommandOption(toolId, option);
   },
   onSpecialCommand(cmd) {
+    if (cmd && typeof cmd === 'object') {
+      if (cmd.type === 'viewSave') {
+        if (!saveNamedView(cmd.name)) {
+          cmdline.addHistory('VSAVE: ビュー名を指定してください', '#cc7777');
+          return;
+        }
+        cmdline.addHistory(`ビュー保存: ${cmd.name}`, '#8aa8c0');
+        return;
+      }
+      if (cmd.type === 'viewRestore') {
+        if (!restoreNamedView(cmd.name)) {
+          cmdline.addHistory(`VRESTORE: '${cmd.name}' が見つかりません`, '#cc7777');
+          return;
+        }
+        cmdline.addHistory(`ビュー復元: ${cmd.name}`, '#8aa8c0');
+        return;
+      }
+      if (cmd.type === 'viewList') {
+        const names = listNamedViews();
+        cmdline.addHistory(names.length ? `保存ビュー: ${names.join(', ')}` : '保存ビューはありません', '#8aa8c0');
+        return;
+      }
+    }
+
     if (cmd === 'escape') escapeCurrentTool();
     else if (cmd === 'undo') undo();
     else if (cmd === 'redo') redo();
