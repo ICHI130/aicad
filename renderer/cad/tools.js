@@ -1,12 +1,14 @@
 import { mmToScreen, snapToGrid } from './canvas.js';
 import { getDashPattern } from './linetypes.js';
 import { resolveShapeColor } from './colors.js';
+import { getDimStyle, formatDimValue } from '../ui/dimstyle.js';
 
 export const Tool = {
   SELECT: 'select',
   LINE: 'line',
   RECT: 'rect',
   CIRCLE: 'circle',
+  ELLIPSE: 'ellipse',
   ARC: 'arc',
   POLYLINE: 'polyline',
   DIM: 'dim',
@@ -19,6 +21,9 @@ export const Tool = {
   JOIN: 'join',
   EXPLODE: 'explode',
   TRIM: 'trim',
+  BREAK: 'break',
+  LENGTHEN: 'lengthen',
+  CHAMFER: 'chamfer',
   EXTEND: 'extend',
   FILLET: 'fillet',
   ARRAY: 'array',
@@ -84,6 +89,23 @@ export function buildShapeNode(shape, viewport, options = {}) {
     });
   }
 
+  if (shape.type === 'ellipse') {
+    const c = mmToScreen({ x: shape.cx, y: shape.cy }, viewport);
+    return new Konva.Ellipse({
+      x: c.x,
+      y: c.y,
+      radiusX: shape.rx * viewport.scale,
+      radiusY: shape.ry * viewport.scale,
+      rotation: shape.rotation || 0,
+      stroke: color,
+      strokeWidth: sw,
+      fill: 'transparent',
+      dash,
+      id: shape.id,
+      listening: !isPreview,
+    });
+  }
+
   if (shape.type === 'polyline_preview') {
     const points = [];
     for (const point of shape.points) {
@@ -100,13 +122,49 @@ export function buildShapeNode(shape, viewport, options = {}) {
     });
   }
 
+  if (shape.type === 'dim' && shape.dimType === 'radius') {
+    const style = getDimStyle();
+    const group = new Konva.Group({ id: shape.id, listening: !isPreview });
+    const c = mmToScreen({ x: shape.cx, y: shape.cy }, viewport);
+    const pt = mmToScreen({ x: shape.px, y: shape.py }, viewport);
+    group.add(new Konva.Arrow({
+      points: [c.x, c.y, pt.x, pt.y],
+      stroke: color,
+      fill: color,
+      strokeWidth: sw,
+      pointerLength: Math.max(4, style.arrowSize * viewport.scale),
+      pointerWidth: Math.max(3, style.arrowSize * viewport.scale * 0.75),
+    }));
+    group.add(new Konva.Text({
+      x: pt.x + 4,
+      y: pt.y - 14,
+      text: `R${formatDimValue(shape.r)}`,
+      fontSize: Math.max(10, style.textHeight * viewport.scale),
+      fill: color,
+    }));
+    return group;
+  }
+
+  if (shape.type === 'dim' && shape.dimType === 'diameter') {
+    const style = getDimStyle();
+    const group = new Konva.Group({ id: shape.id, listening: !isPreview });
+    const p1 = mmToScreen({ x: shape.cx - shape.r, y: shape.cy }, viewport);
+    const p2 = mmToScreen({ x: shape.cx + shape.r, y: shape.cy }, viewport);
+    const mid = mmToScreen({ x: shape.cx, y: shape.cy - shape.r * 0.5 }, viewport);
+    group.add(new Konva.Arrow({ points: [p1.x, p1.y, p2.x, p2.y], stroke: color, fill: color, strokeWidth: sw, pointerLength: Math.max(4, style.arrowSize * viewport.scale), pointerWidth: Math.max(3, style.arrowSize * viewport.scale * 0.75) }));
+    group.add(new Konva.Arrow({ points: [p2.x, p2.y, p1.x, p1.y], stroke: color, fill: color, strokeWidth: sw, pointerLength: Math.max(4, style.arrowSize * viewport.scale), pointerWidth: Math.max(3, style.arrowSize * viewport.scale * 0.75) }));
+    group.add(new Konva.Text({ x: mid.x + 4, y: mid.y - 14, text: `φ${formatDimValue(shape.r * 2)}`, fontSize: Math.max(10, style.textHeight * viewport.scale), fill: color }));
+    return group;
+  }
+
   if (shape.type === 'dim') {
+    const style = getDimStyle();
     const group = new Konva.Group({ listening: !isPreview, id: shape.id });
     const vertical = shape.dir === 'v';
     const isAligned = shape.dir === 'a';
     const p1 = { x: shape.x1, y: shape.y1 };
     const p2 = { x: shape.x2, y: shape.y2 };
-    const off = shape.offset || 10;
+    const off = shape.offset ?? style.offset;
     let d1 = { ...p1 };
     let d2 = { ...p2 };
 
@@ -133,16 +191,16 @@ export function buildShapeNode(shape, viewport, options = {}) {
 
     group.add(new Konva.Line({ points: [p1s.x, p1s.y, d1s.x, d1s.y], stroke: color, strokeWidth: sw }));
     group.add(new Konva.Line({ points: [p2s.x, p2s.y, d2s.x, d2s.y], stroke: color, strokeWidth: sw }));
-    group.add(new Konva.Arrow({ points: [d1s.x, d1s.y, d2s.x, d2s.y], stroke: color, fill: color, strokeWidth: sw, pointerLength: 8, pointerWidth: 6 }));
-    group.add(new Konva.Arrow({ points: [d2s.x, d2s.y, d1s.x, d1s.y], stroke: color, fill: color, strokeWidth: sw, pointerLength: 8, pointerWidth: 6 }));
+    group.add(new Konva.Arrow({ points: [d1s.x, d1s.y, d2s.x, d2s.y], stroke: color, fill: color, strokeWidth: sw, pointerLength: Math.max(4, style.arrowSize * viewport.scale), pointerWidth: Math.max(3, style.arrowSize * viewport.scale * 0.75) }));
+    group.add(new Konva.Arrow({ points: [d2s.x, d2s.y, d1s.x, d1s.y], stroke: color, fill: color, strokeWidth: sw, pointerLength: Math.max(4, style.arrowSize * viewport.scale), pointerWidth: Math.max(3, style.arrowSize * viewport.scale * 0.75) }));
 
     const dist = Math.hypot(shape.x2 - shape.x1, shape.y2 - shape.y1);
     const mid = mmToScreen({ x: (d1.x + d2.x) / 2, y: (d1.y + d2.y) / 2 }, viewport);
     group.add(new Konva.Text({
       x: mid.x + 4,
       y: mid.y - 16,
-      text: `${Math.round(dist)} mm`,
-      fontSize: Math.max(10, 10 * viewport.scale),
+      text: formatDimValue(dist),
+      fontSize: Math.max(10, style.textHeight * viewport.scale),
       fill: color,
     }));
     return group;

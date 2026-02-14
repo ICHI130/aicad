@@ -18,6 +18,7 @@ const TOOL_DEFS = [
   { id: Tool.LINE,     icon: '╱', labelKey: 'line',     key: 'L' },
   { id: Tool.RECT,     icon: '□', labelKey: 'rect',     key: 'REC' },
   { id: Tool.CIRCLE,   icon: '○', labelKey: 'circle',   key: 'C' },
+  { id: Tool.ELLIPSE,  icon: '⬭', labelKey: 'ellipse',  key: 'EL' },
   { id: Tool.ARC,      icon: '◜', labelKey: 'arc',      key: 'A' },
   { id: Tool.POLYLINE, icon: '〜', labelKey: 'polyline', key: 'PL' },
   { id: Tool.TEXT,     icon: 'Ａ', labelKey: 'text',     key: 'T' },

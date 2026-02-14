@@ -13,6 +13,8 @@ import { DEFAULT_LAYER_COLOR } from './cad/colors.js';
 import { initLayerPanel } from './ui/layerpanel.js';
 import { initI18n } from './ui/i18n.js';
 import { initPropertyPanel } from './ui/propertypanel.js';
+import { initDynInput } from './ui/dyninput.js';
+import { getDimStyle, setDimStyle } from './ui/dimstyle.js';
 
 // ──────────────────────────────────────────────
 // DXF デコード（CP932 対応）
@@ -175,8 +177,9 @@ let copyState = null;
 let rotateState = null;
 let scaleState = null;
 let arcState = { p1: null, p2: null };
+let ellipseState = { center: null, rx: null };
 let arrayState = { base: null, source: null, count: 4 };
-let dimState = { p1: null, p2: null };
+let dimState = { p1: null, p2: null, circle: null, mode: 'linear' };
 let latestSnap = { x: 0, y: 0, type: 'grid' };
 let lastNonSelectTool = Tool.LINE;
 
@@ -187,6 +190,9 @@ let mirrorState = { p1: null };
 // トリム状態
 let trimState = { boundaries: [], phase: 0 };
 let extendState = { boundaries: [], phase: 0 };
+let breakState = { shapeId: null, pt1: null };
+let lengthenState = { delta: null };
+let chamferState = { d1: null, d2: null, first: null };
 // フィレット状態
 let filletState = { r: null, first: null };
 // テキスト入力状態
@@ -211,6 +217,37 @@ const history = [];
 let historyIndex = -1;
 const MAX_HISTORY = 50;
 
+
+
+function initDimStyleControls() {
+  const textHeight = document.getElementById('dim-text-height');
+  const arrowSize = document.getElementById('dim-arrow-size');
+  const unit = document.getElementById('dim-unit');
+  const precision = document.getElementById('dim-precision');
+  if (!textHeight || !arrowSize || !unit || !precision) return;
+
+  const style = getDimStyle();
+  textHeight.value = String(style.textHeight);
+  arrowSize.value = String(style.arrowSize);
+  unit.value = style.unit;
+  precision.value = String(style.precision);
+
+  const apply = () => {
+    const next = {
+      textHeight: Math.max(0.5, parseFloat(textHeight.value) || style.textHeight),
+      arrowSize: Math.max(0.5, parseFloat(arrowSize.value) || style.arrowSize),
+      unit: unit.value || style.unit,
+      precision: Math.max(0, Math.min(4, parseInt(precision.value, 10) || 0)),
+    };
+    setDimStyle(next);
+    redraw();
+  };
+
+  textHeight.addEventListener('input', apply);
+  arrowSize.addEventListener('input', apply);
+  unit.addEventListener('change', apply);
+  precision.addEventListener('change', apply);
+}
 
 function normalizeLayerId(raw) {
   return String(raw || '').trim().replace(/\s+/g, '_').toLowerCase();
@@ -308,12 +345,17 @@ function changeTool(nextTool) {
   rotateState = null;
   scaleState = null;
   arcState = { p1: null, p2: null };
+  ellipseState = { center: null, rx: null };
   arrayState = { base: null, source: null, count: 4 };
-  dimState = { p1: null, p2: null };
+  dimState = { p1: null, p2: null, circle: null, mode: 'linear' };
+  ellipseState = { center: null, rx: null };
   offsetState = { dist: null, base: null };
   mirrorState = { p1: null };
   trimState = { boundaries: [], phase: 0 };
   extendState = { boundaries: [], phase: 0 };
+  breakState = { shapeId: null, pt1: null };
+  lengthenState = { delta: null };
+  chamferState = { d1: null, d2: null, first: null };
   filletState = { r: null, first: null };
   textState = { point: null, inputEl: null };
   toolbar.setActive(tool);
@@ -325,6 +367,26 @@ function changeTool(nextTool) {
   if (tool === Tool.OFFSET) {
     cmdline.setLabel('[オフセット] 距離を入力 [Enter]:');
     statusbar.setCustomGuide('オフセット距離を入力してEnter');
+  } else if (tool === Tool.LENGTHEN || tool === Tool.CHAMFER) {
+    const num = parseFloat(str);
+    if (!isNaN(num) && num !== 0) {
+      lengthenState.delta = num;
+      cmdline.setLabel(`[長さ変更] 線分端をクリック (Δ${num}mm):`);
+      statusbar.setGuide(tool, 1);
+    }
+  } else if (tool === Tool.CHAMFER) {
+    const parts = str.split(',').map((v) => parseFloat(v.trim())).filter((v) => !isNaN(v));
+    if (parts.length === 1 && parts[0] > 0) {
+      chamferState.d1 = parts[0];
+      chamferState.d2 = parts[0];
+    } else if (parts.length >= 2 && parts[0] > 0 && parts[1] > 0) {
+      chamferState.d1 = parts[0];
+      chamferState.d2 = parts[1];
+    }
+    if (chamferState.d1 !== null && chamferState.d2 !== null) {
+      cmdline.setLabel(`[面取り] 1本目の線をクリック (d1=${chamferState.d1}, d2=${chamferState.d2})`);
+      statusbar.setGuide(tool, 1);
+    }
   } else if (tool === Tool.FILLET) {
     cmdline.setLabel('[フィレット] 半径を入力 [Enter] (0=直角):');
     statusbar.setCustomGuide('フィレット半径を入力してEnter');
@@ -441,6 +503,7 @@ const statusbar = initStatusbar({
 });
 statusbar.setTool(tool);
 statusbar.setGuide(tool, 0);
+const dynInput = initDynInput();
 
 if (window.cadBridge?.onMenuOpenFile) window.cadBridge.onMenuOpenFile(() => openCadFile());
 if (window.cadBridge?.onMenuPrint) window.cadBridge.onMenuPrint(() => printCurrentViewAsPdf());
@@ -462,6 +525,8 @@ const cmdline = initCommandLine({
   },
 });
 
+initDimStyleControls();
+
 initSidebar({
   getDrawingContext() {
     const elements = shapes.map((s) => {
@@ -469,8 +534,11 @@ initSidebar({
       if (s.type === 'line') return { type: 'line', x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2, layer };
       if (s.type === 'arc') return { type: 'arc', cx: s.cx, cy: s.cy, r: s.r, startAngle: s.startAngle, endAngle: s.endAngle, layer };
       if (s.type === 'circle') return { type: 'circle', cx: s.cx, cy: s.cy, r: s.r, layer };
+      if (s.type === 'ellipse') return { type: 'ellipse', cx: s.cx, cy: s.cy, rx: s.rx, ry: s.ry, rotation: s.rotation || 0, layer };
       if (s.type === 'text') return { type: 'text', x: s.x, y: s.y, text: s.text, height: s.height, rotation: s.rotation, layer };
       if (s.type === 'point') return { type: 'point', x: s.x, y: s.y, layer };
+      if (s.type === 'dim' && s.dimType === 'radius') return { type: 'dim', dimType: 'radius', cx: s.cx, cy: s.cy, r: s.r, px: s.px, py: s.py, layer };
+      if (s.type === 'dim' && s.dimType === 'diameter') return { type: 'dim', dimType: 'diameter', cx: s.cx, cy: s.cy, r: s.r, layer };
       if (s.type === 'dim') return { type: 'dim', x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2, layer };
       if (s.type === 'hatch') return { type: 'hatch', hatchKind: s.hatchKind, x: s.x, y: s.y, w: s.w, h: s.h, cx: s.cx, cy: s.cy, r: s.r, layer };
       return { type: 'rect', x: s.x, y: s.y, w: s.w, h: s.h, layer };
@@ -513,7 +581,10 @@ function computeBoundingBox(elements) {
   for (const e of elements) {
     if (e.type === 'line') { xs.push(e.x1, e.x2); ys.push(e.y1, e.y2); }
     else if (e.type === 'arc' || e.type === 'circle') { xs.push(e.cx - e.r, e.cx + e.r); ys.push(e.cy - e.r, e.cy + e.r); }
+    else if (e.type === 'ellipse') { xs.push(e.cx - e.rx, e.cx + e.rx); ys.push(e.cy - e.ry, e.cy + e.ry); }
     else if (e.type === 'text' || e.type === 'point') { xs.push(e.x); ys.push(e.y); }
+    else if (e.type === 'dim' && e.dimType === 'radius') { xs.push(e.cx, e.px); ys.push(e.cy, e.py); }
+    else if (e.type === 'dim' && e.dimType === 'diameter') { xs.push(e.cx - e.r, e.cx + e.r); ys.push(e.cy - e.r, e.cy + e.r); }
     else if (e.type === 'dim') { xs.push(e.x1, e.x2); ys.push(e.y1, e.y2); }
     else if (e.type === 'hatch') {
       if (e.hatchKind === 'circle') { xs.push(e.cx - e.r, e.cx + e.r); ys.push(e.cy - e.r, e.cy + e.r); }
@@ -555,6 +626,12 @@ function pickShape(mmPoint) {
     }
     if (s.type === 'arc' || s.type === 'circle') {
       if (Math.abs(Math.hypot(mmPoint.x - s.cx, mmPoint.y - s.cy) - s.r) <= threshold) return s;
+      continue;
+    }
+    if (s.type === 'ellipse') {
+      const nx = (mmPoint.x - s.cx) / Math.max(s.rx, 1e-9);
+      const ny = (mmPoint.y - s.cy) / Math.max(s.ry, 1e-9);
+      if (Math.abs(nx * nx + ny * ny - 1) <= 0.12) return s;
       continue;
     }
     if (s.type === 'text') {
@@ -746,8 +823,14 @@ function runExplodeCommand() {
 
 function applyMove(shape, dx, dy) {
   if (shape.type === 'rect') { shape.x += dx; shape.y += dy; return; }
-  if (shape.type === 'line' || shape.type === 'dim') { shape.x1 += dx; shape.y1 += dy; shape.x2 += dx; shape.y2 += dy; return; }
-  if (shape.type === 'arc' || shape.type === 'circle') { shape.cx += dx; shape.cy += dy; return; }
+  if (shape.type === 'line') { shape.x1 += dx; shape.y1 += dy; shape.x2 += dx; shape.y2 += dy; return; }
+  if (shape.type === 'dim') {
+    if (shape.dimType === 'radius') { shape.cx += dx; shape.cy += dy; shape.px += dx; shape.py += dy; return; }
+    if (shape.dimType === 'diameter') { shape.cx += dx; shape.cy += dy; return; }
+    shape.x1 += dx; shape.y1 += dy; shape.x2 += dx; shape.y2 += dy;
+    return;
+  }
+  if (shape.type === 'arc' || shape.type === 'circle' || shape.type === 'ellipse') { shape.cx += dx; shape.cy += dy; return; }
   if (shape.type === 'text' || shape.type === 'point') { shape.x += dx; shape.y += dy; return; }
   if (shape.type === 'hatch') {
     if (shape.hatchKind === 'circle') { shape.cx += dx; shape.cy += dy; }
@@ -762,7 +845,7 @@ function rotatePoint(px, py, cx, cy, angleDeg) {
 }
 
 function applyRotate(shape, center, angleDeg) {
-  if (shape.type === 'line' || shape.type === 'dim') {
+  if (shape.type === 'line' || (shape.type === 'dim' && !shape.dimType)) {
     const p1 = rotatePoint(shape.x1, shape.y1, center.x, center.y, angleDeg);
     const p2 = rotatePoint(shape.x2, shape.y2, center.x, center.y, angleDeg);
     shape.x1 = p1.x; shape.y1 = p1.y; shape.x2 = p2.x; shape.y2 = p2.y;
@@ -776,7 +859,14 @@ function applyRotate(shape, center, angleDeg) {
     const xs = corners.map((p) => p.x), ys = corners.map((p) => p.y);
     shape.x = Math.min(...xs); shape.y = Math.min(...ys);
     shape.w = Math.max(...xs) - shape.x; shape.h = Math.max(...ys) - shape.y;
-  } else if (shape.type === 'arc' || shape.type === 'circle') {
+  } else if (shape.type === 'dim' && shape.dimType === 'radius') {
+    const c = rotatePoint(shape.cx, shape.cy, center.x, center.y, angleDeg);
+    const p = rotatePoint(shape.px, shape.py, center.x, center.y, angleDeg);
+    shape.cx = c.x; shape.cy = c.y; shape.px = p.x; shape.py = p.y;
+  } else if (shape.type === 'dim' && shape.dimType === 'diameter') {
+    const c = rotatePoint(shape.cx, shape.cy, center.x, center.y, angleDeg);
+    shape.cx = c.x; shape.cy = c.y;
+  } else if (shape.type === 'arc' || shape.type === 'circle' || shape.type === 'ellipse') {
     const c = rotatePoint(shape.cx, shape.cy, center.x, center.y, angleDeg);
     shape.cx = c.x; shape.cy = c.y;
     if (shape.type === 'arc') { shape.startAngle += angleDeg; shape.endAngle += angleDeg; }
@@ -798,7 +888,7 @@ function applyRotate(shape, center, angleDeg) {
 function applyScale(shape, base, ratio) {
   if (!isFinite(ratio) || ratio <= 0) return;
   const scalePoint = (x, y) => ({ x: base.x + (x - base.x) * ratio, y: base.y + (y - base.y) * ratio });
-  if (shape.type === 'line' || shape.type === 'dim') {
+  if (shape.type === 'line' || (shape.type === 'dim' && !shape.dimType)) {
     const p1 = scalePoint(shape.x1, shape.y1);
     const p2 = scalePoint(shape.x2, shape.y2);
     shape.x1 = p1.x; shape.y1 = p1.y; shape.x2 = p2.x; shape.y2 = p2.y;
@@ -813,11 +903,30 @@ function applyScale(shape, base, ratio) {
     shape.h *= ratio;
     return;
   }
+  if (shape.type === 'dim' && shape.dimType === 'radius') {
+    const c = scalePoint(shape.cx, shape.cy);
+    const p = scalePoint(shape.px, shape.py);
+    shape.cx = c.x; shape.cy = c.y; shape.px = p.x; shape.py = p.y; shape.r *= ratio;
+    return;
+  }
+  if (shape.type === 'dim' && shape.dimType === 'diameter') {
+    const c = scalePoint(shape.cx, shape.cy);
+    shape.cx = c.x; shape.cy = c.y; shape.r *= ratio;
+    return;
+  }
   if (shape.type === 'arc' || shape.type === 'circle') {
     const c = scalePoint(shape.cx, shape.cy);
     shape.cx = c.x;
     shape.cy = c.y;
     shape.r *= ratio;
+    return;
+  }
+  if (shape.type === 'ellipse') {
+    const c = scalePoint(shape.cx, shape.cy);
+    shape.cx = c.x;
+    shape.cy = c.y;
+    shape.rx *= ratio;
+    shape.ry *= ratio;
     return;
   }
   if (shape.type === 'text') {
@@ -886,11 +995,18 @@ function mirrorPoint(px, py, p1, p2) {
 function mirrorShape(shape, p1, p2) {
   const s = shapeClone(shape);
   s.id = `shape_${crypto.randomUUID()}`;
-  if (s.type === 'line' || s.type === 'dim') {
+  if (s.type === 'line' || (s.type === 'dim' && !s.dimType)) {
     const mp1 = mirrorPoint(s.x1, s.y1, p1, p2);
     const mp2 = mirrorPoint(s.x2, s.y2, p1, p2);
     s.x1 = mp1.x; s.y1 = mp1.y; s.x2 = mp2.x; s.y2 = mp2.y;
-  } else if (s.type === 'arc' || s.type === 'circle') {
+  } else if (s.type === 'dim' && s.dimType === 'radius') {
+    const mc = mirrorPoint(s.cx, s.cy, p1, p2);
+    const mp = mirrorPoint(s.px, s.py, p1, p2);
+    s.cx = mc.x; s.cy = mc.y; s.px = mp.x; s.py = mp.y;
+  } else if (s.type === 'dim' && s.dimType === 'diameter') {
+    const mc = mirrorPoint(s.cx, s.cy, p1, p2);
+    s.cx = mc.x; s.cy = mc.y;
+  } else if (s.type === 'arc' || s.type === 'circle' || s.type === 'ellipse') {
     const mc = mirrorPoint(s.cx, s.cy, p1, p2);
     s.cx = mc.x; s.cy = mc.y;
   } else if (s.type === 'rect') {
@@ -999,7 +1115,7 @@ function fitView(targetShapes) {
   if (!all.length) return;
   const xs = [], ys = [];
   for (const s of all) {
-    if (s.type === 'line' || s.type === 'dim') { xs.push(s.x1, s.x2); ys.push(s.y1, s.y2); }
+    if (s.type === 'line' || (s.type === 'dim' && !s.dimType)) { xs.push(s.x1, s.x2); ys.push(s.y1, s.y2); }
     else if (s.type === 'arc' || s.type === 'circle') { xs.push(s.cx - s.r, s.cx + s.r); ys.push(s.cy - s.r, s.cy + s.r); }
     else if (s.type === 'rect') { xs.push(s.x, s.x + s.w); ys.push(s.y, s.y + s.h); }
     else if (s.type === 'hatch') {
@@ -1071,12 +1187,16 @@ function escapeCurrentTool() {
   rotateState = null;
   scaleState = null;
   arcState = { p1: null, p2: null };
+  ellipseState = { center: null, rx: null };
   arrayState = { base: null, source: null, count: 4 };
-  dimState = { p1: null, p2: null };
+  dimState = { p1: null, p2: null, circle: null, mode: 'linear' };
   offsetState = { dist: null, base: null };
   mirrorState = { p1: null };
   trimState = { boundaries: [], phase: 0 };
   extendState = { boundaries: [], phase: 0 };
+  breakState = { shapeId: null, pt1: null };
+  lengthenState = { delta: null };
+  chamferState = { d1: null, d2: null, first: null };
   filletState = { r: null, first: null };
   textState = { point: null, inputEl: null };
   tool = Tool.SELECT;
@@ -1084,6 +1204,7 @@ function escapeCurrentTool() {
   statusbar.setTool(tool);
   statusbar.setGuide(tool, 0);
   cmdline.setLabel('コマンド:');
+  dynInput.hide();
   redraw();
 }
 
@@ -1105,6 +1226,25 @@ function deleteSelected() {
 // ──────────────────────────────────────────────
 function handleCmdlineCoord(str) {
   // ツール状態に応じて座標を解釈
+  if (tool === Tool.DIM) {
+    const mode = str.trim().toLowerCase();
+    if (mode === 'r') {
+      dimState = { p1: null, p2: null, circle: null, mode: 'radius' };
+      cmdline.setLabel('[寸法] 半径寸法: 円をクリック');
+      return;
+    }
+    if (mode === 'd') {
+      dimState = { p1: null, p2: null, circle: null, mode: 'diameter' };
+      cmdline.setLabel('[寸法] 直径寸法: 円をクリック');
+      return;
+    }
+    if (mode === '' || mode === 'l') {
+      dimState = { p1: null, p2: null, circle: null, mode: 'linear' };
+      cmdline.setLabel('[寸法] 線形寸法: 始点をクリック');
+      return;
+    }
+  }
+
   if (tool === Tool.LINE) {
     if (!drawingStart) {
       const pt = handleCoordInput(str, null, null);
@@ -1176,6 +1316,31 @@ function handleCmdlineCoord(str) {
       previewShape = null;
     }
 
+  } else if (tool === Tool.ELLIPSE) {
+    const pt = handleCoordInput(str, null, null);
+    if (!pt) return;
+    if (!ellipseState.center) {
+      ellipseState.center = pt;
+      statusbar.setGuide(tool, 1);
+      return;
+    }
+    if (ellipseState.rx === null) {
+      ellipseState.rx = Math.abs(pt.x - ellipseState.center.x);
+      statusbar.setGuide(tool, 2);
+      return;
+    }
+    const ry = Math.abs(pt.y - ellipseState.center.y);
+    if (ellipseState.rx > 0 && ry > 0) {
+      const id = `shape_${crypto.randomUUID()}`;
+      shapes.push(assignCurrentLayer({ id, type: 'ellipse', cx: ellipseState.center.x, cy: ellipseState.center.y, rx: ellipseState.rx, ry, rotation: 0 }));
+      selectedId = id;
+      saveHistory();
+      redraw();
+    }
+    ellipseState = { center: null, rx: null };
+    previewShape = null;
+
+
   } else if (tool === Tool.ARC) {
     const pt = handleCoordInput(str, null, null);
     if (!pt) return;
@@ -1198,6 +1363,15 @@ function handleCmdlineCoord(str) {
       redraw();
       cmdline.setPrompt(tool, 0);
     }
+  } else if (tool === Tool.BREAK) {
+    cmdline.setLabel('[ブレーク] 切断する線をクリック:');
+    statusbar.setCustomGuide('切断する線を選択');
+  } else if (tool === Tool.LENGTHEN || tool === Tool.CHAMFER) {
+    cmdline.setLabel('[長さ変更] 増減長さを入力 [Enter]:');
+    statusbar.setCustomGuide('長さ変更量を入力して線分端をクリック');
+  } else if (tool === Tool.CHAMFER) {
+    cmdline.setLabel('[面取り] 距離を入力 [Enter] (d または d1,d2):');
+    statusbar.setCustomGuide('面取り距離を入力して2線を選択');
   } else if (tool === Tool.ARRAY) {
     if (!selectedId) return;
     const src = shapes.find((shape) => shape.id === selectedId);
@@ -1250,6 +1424,26 @@ function handleCmdlineCoord(str) {
         statusbar.setGuide(tool, 1);
         cmdline.addHistory(`オフセット距離: ${num}mm`, '#4da6ff');
       }
+    }
+  } else if (tool === Tool.LENGTHEN || tool === Tool.CHAMFER) {
+    const num = parseFloat(str);
+    if (!isNaN(num) && num !== 0) {
+      lengthenState.delta = num;
+      cmdline.setLabel(`[長さ変更] 線分端をクリック (Δ${num}mm):`);
+      statusbar.setGuide(tool, 1);
+    }
+  } else if (tool === Tool.CHAMFER) {
+    const parts = str.split(',').map((v) => parseFloat(v.trim())).filter((v) => !isNaN(v));
+    if (parts.length === 1 && parts[0] > 0) {
+      chamferState.d1 = parts[0];
+      chamferState.d2 = parts[0];
+    } else if (parts.length >= 2 && parts[0] > 0 && parts[1] > 0) {
+      chamferState.d1 = parts[0];
+      chamferState.d2 = parts[1];
+    }
+    if (chamferState.d1 !== null && chamferState.d2 !== null) {
+      cmdline.setLabel(`[面取り] 1本目の線をクリック (d1=${chamferState.d1}, d2=${chamferState.d2})`);
+      statusbar.setGuide(tool, 1);
     }
   } else if (tool === Tool.FILLET) {
     if (filletState.r === null) {
@@ -1386,6 +1580,7 @@ function exportCurrentDxf() {
 stage.on('mousemove', () => {
   let mm = getSnap();
   statusbar.updateCursor(mm, latestSnap?.type || 'grid', snapMode);
+  const pointer = stage.getPointerPosition();
 
   if (isPanning && panStart) {
     const now = stage.getPointerPosition();
@@ -1436,6 +1631,14 @@ stage.on('mousemove', () => {
     || (moveState?.base) || (copyState?.base) || (scaleState?.base) || (arrayState?.base);
   if (orthoMode && orthoRef) mm = applyOrtho(orthoRef, mm);
 
+  if (pointer && ((tool === Tool.LINE || tool === Tool.RECT || tool === Tool.CIRCLE) && drawingStart
+    || (tool === Tool.ELLIPSE && ellipseState.center)) ) {
+    const from = tool === Tool.ELLIPSE ? ellipseState.center : drawingStart;
+    dynInput.update(pointer.x, pointer.y, from, mm);
+  } else {
+    dynInput.hide();
+  }
+
   previewShape = buildPreviewShape({
     tool,
     drawingStart,
@@ -1443,6 +1646,7 @@ stage.on('mousemove', () => {
     polylinePoints,
     dimState,
     arcState,
+    ellipseState,
     arrayState,
     normalizeRect,
     arcFromThreePoints,
@@ -1567,6 +1771,32 @@ stage.on('mousedown', (event) => {
       saveHistory();
     }
     drawingStart = null; previewShape = null; redraw();
+    dynInput.hide();
+    return;
+  }
+
+
+  if (tool === Tool.ELLIPSE) {
+    if (!ellipseState.center) {
+      ellipseState.center = mm;
+      statusbar.setGuide(tool, 1);
+      return;
+    }
+    if (ellipseState.rx === null) {
+      ellipseState.rx = Math.abs(mm.x - ellipseState.center.x);
+      statusbar.setGuide(tool, 2);
+      return;
+    }
+    const ry = Math.abs(mm.y - ellipseState.center.y);
+    if (ellipseState.rx > 0 && ry > 0) {
+      const id = `shape_${crypto.randomUUID()}`;
+      shapes.push(assignCurrentLayer({ id, type: 'ellipse', cx: ellipseState.center.x, cy: ellipseState.center.y, rx: ellipseState.rx, ry, rotation: 0 }));
+      selectedId = id;
+      saveHistory();
+    }
+    ellipseState = { center: null, rx: null };
+    previewShape = null;
+    redraw();
     return;
   }
 
@@ -1606,12 +1836,52 @@ stage.on('mousedown', (event) => {
   }
 
   if (tool === Tool.DIM) {
+    if (dimState.mode === 'radius') {
+      if (!dimState.circle) {
+        const hit = pickShape(mm);
+        if (!hit || hit.type !== 'circle') return;
+        dimState.circle = hit;
+        statusbar.setGuide(tool, 1);
+        cmdline.setLabel('[寸法] 引き出し点をクリック:');
+        return;
+      }
+      shapes.push(assignCurrentLayer({
+        id: `shape_${crypto.randomUUID()}`,
+        type: 'dim',
+        dimType: 'radius',
+        cx: dimState.circle.cx,
+        cy: dimState.circle.cy,
+        r: dimState.circle.r,
+        px: mm.x,
+        py: mm.y,
+      }));
+      dimState = { p1: null, p2: null, circle: null, mode: 'radius' };
+      previewShape = null;
+      saveHistory();
+      redraw();
+      return;
+    }
+    if (dimState.mode === 'diameter') {
+      const hit = pickShape(mm);
+      if (!hit || hit.type !== 'circle') return;
+      shapes.push(assignCurrentLayer({
+        id: `shape_${crypto.randomUUID()}`,
+        type: 'dim',
+        dimType: 'diameter',
+        cx: hit.cx,
+        cy: hit.cy,
+        r: hit.r,
+      }));
+      saveHistory();
+      redraw();
+      return;
+    }
     if (!dimState.p1) { dimState.p1 = mm; statusbar.setGuide(tool, 1); return; }
     if (!dimState.p2) { dimState.p2 = mm; statusbar.setGuide(tool, 2); return; }
     const dir = Math.abs(dimState.p2.x - dimState.p1.x) > Math.abs(dimState.p2.y - dimState.p1.y) ? 'h' : 'v';
     const offset = dir === 'h' ? mm.y - dimState.p1.y : mm.x - dimState.p1.x;
     shapes.push(assignCurrentLayer({ id: `shape_${crypto.randomUUID()}`, type: 'dim', x1: dimState.p1.x, y1: dimState.p1.y, x2: dimState.p2.x, y2: dimState.p2.y, offset, dir }));
-    dimState = { p1: null, p2: null }; previewShape = null;
+    dimState = { p1: null, p2: null, circle: null, mode: 'linear' }; previewShape = null;
     saveHistory(); redraw();
     return;
   }
@@ -1785,6 +2055,54 @@ stage.on('mousedown', (event) => {
     return;
   }
 
+  if (tool === Tool.BREAK) {
+    if (!breakState.shapeId) {
+      const hit = pickShape(mm);
+      if (!hit || hit.type !== 'line') return;
+      breakState.shapeId = hit.id;
+      selectedId = hit.id;
+      statusbar.setGuide(tool, 1);
+      cmdline.setLabel('[ブレーク] 切断点1をクリック:');
+      redraw();
+      return;
+    }
+    const line = shapes.find((shape) => shape.id === breakState.shapeId);
+    if (!line || line.type !== 'line') {
+      breakState = { shapeId: null, pt1: null };
+      return;
+    }
+    if (!breakState.pt1) {
+      const t1 = pointToLineParam(line, mm);
+      breakState.pt1 = pointOnLineByT(line, t1);
+      statusbar.setGuide(tool, 2);
+      cmdline.setLabel('[ブレーク] 切断点2をクリック:');
+      redraw();
+      return;
+    }
+    const t1 = pointToLineParam(line, breakState.pt1);
+    const t2 = pointToLineParam(line, mm);
+    const ta = Math.min(t1, t2);
+    const tb = Math.max(t1, t2);
+    if (Math.abs(tb - ta) < 1e-6) return;
+    const pA = pointOnLineByT(line, ta);
+    const pB = pointOnLineByT(line, tb);
+    const inserts = [];
+    if (ta > 1e-6) inserts.push(assignCurrentLayer({ ...shapeClone(line), id: `shape_${crypto.randomUUID()}`, x2: pA.x, y2: pA.y }));
+    if (tb < 1 - 1e-6) inserts.push(assignCurrentLayer({ ...shapeClone(line), id: `shape_${crypto.randomUUID()}`, x1: pB.x, y1: pB.y }));
+    const idxLine = shapes.findIndex((shape) => shape.id === line.id);
+    if (idxLine !== -1) {
+      shapes.splice(idxLine, 1, ...inserts);
+      saveHistory();
+      cmdline.addHistory('ブレーク完了', '#4da6ff');
+    }
+    breakState = { shapeId: null, pt1: null };
+    selectedId = null;
+    changeTool(Tool.SELECT);
+    redraw();
+    return;
+  }
+
+
   if (tool === Tool.TRIM) {
     if (trimState.phase === 0) {
       const hit = pickShape(mm);
@@ -1843,6 +2161,87 @@ stage.on('mousedown', (event) => {
     }
     return;
   }
+
+  if (tool === Tool.CHAMFER) {
+    if (chamferState.d1 === null || chamferState.d2 === null) {
+      cmdline.addHistory('先に面取り距離を入力してください', '#ff6666');
+      return;
+    }
+    if (!chamferState.first) {
+      const hit = pickShape(mm);
+      if (!hit || hit.type !== 'line') return;
+      chamferState.first = { line: hit, click: mm };
+      selectedId = hit.id;
+      statusbar.setGuide(tool, 2);
+      cmdline.setLabel('[面取り] 2本目の線をクリック:');
+      redraw();
+      return;
+    }
+    const hit = pickShape(mm);
+    if (!hit || hit.type !== 'line' || hit.id === chamferState.first.line.id) return;
+    const first = chamferState.first;
+    const inter = lineIntersectionUnbounded(first.line, hit);
+    const inter2 = lineIntersectionUnbounded(hit, first.line);
+    if (!inter || !inter2) return;
+    const p1Data = pointAlongFromIntersection(first.line, inter, chamferState.d1, first.click);
+    const p2Data = pointAlongFromIntersection(hit, inter2, chamferState.d2, mm);
+    const l1 = shapeClone(first.line);
+    const l2 = shapeClone(hit);
+    if (p1Data.useP1) { l1.x1 = p1Data.point.x; l1.y1 = p1Data.point.y; }
+    else { l1.x2 = p1Data.point.x; l1.y2 = p1Data.point.y; }
+    if (p2Data.useP1) { l2.x1 = p2Data.point.x; l2.y1 = p2Data.point.y; }
+    else { l2.x2 = p2Data.point.x; l2.y2 = p2Data.point.y; }
+    const idx1 = shapes.findIndex((shape) => shape.id === l1.id);
+    const idx2 = shapes.findIndex((shape) => shape.id === l2.id);
+    if (idx1 !== -1) shapes[idx1] = l1;
+    if (idx2 !== -1) shapes[idx2] = l2;
+    shapes.push(assignCurrentLayer({ id: `shape_${crypto.randomUUID()}`, type: 'line', x1: p1Data.point.x, y1: p1Data.point.y, x2: p2Data.point.x, y2: p2Data.point.y }));
+    saveHistory();
+    cmdline.addHistory('面取り完了', '#4da6ff');
+    chamferState = { d1: chamferState.d1, d2: chamferState.d2, first: null };
+    selectedId = null;
+    redraw();
+    return;
+  }
+
+
+  if (tool === Tool.LENGTHEN || tool === Tool.CHAMFER) {
+    if (lengthenState.delta === null) {
+      cmdline.addHistory('先に長さ変更量を入力してください', '#ff6666');
+      return;
+    }
+    const hit = pickShape(mm);
+    if (!hit || hit.type !== 'line') return;
+    const dx = hit.x2 - hit.x1;
+    const dy = hit.y2 - hit.y1;
+    const len = Math.hypot(dx, dy);
+    if (len < 1e-9) return;
+    const nextLen = len + lengthenState.delta;
+    if (nextLen <= 0.1) {
+      cmdline.addHistory('長さが0以下になるため実行できません', '#ff6666');
+      return;
+    }
+    const ux = dx / len;
+    const uy = dy / len;
+    const nearP1 = Math.hypot(mm.x - hit.x1, mm.y - hit.y1) <= Math.hypot(mm.x - hit.x2, mm.y - hit.y2);
+    const line = shapeClone(hit);
+    if (nearP1) {
+      line.x1 = line.x2 - ux * nextLen;
+      line.y1 = line.y2 - uy * nextLen;
+    } else {
+      line.x2 = line.x1 + ux * nextLen;
+      line.y2 = line.y1 + uy * nextLen;
+    }
+    const idxLine = shapes.findIndex((shape) => shape.id === hit.id);
+    if (idxLine !== -1) {
+      shapes[idxLine] = line;
+      saveHistory();
+      cmdline.addHistory(`長さ変更完了: ${Math.round(len)}→${Math.round(nextLen)}mm`, '#4da6ff');
+      redraw();
+    }
+    return;
+  }
+
 
   if (tool === Tool.FILLET) {
     if (filletState.r === null) {
@@ -1969,6 +2368,7 @@ stage.on('mouseup', (event) => {
     return;
   }
   if (dragState) { saveHistory(); dragState = null; }
+  if (tool === Tool.SELECT) dynInput.hide();
 });
 
 stage.on('contextmenu', (event) => {
@@ -1976,7 +2376,7 @@ stage.on('contextmenu', (event) => {
 
   // 作図中は右クリックでキャンセル/確定
   if (tool === Tool.POLYLINE) { finishPolyline(false); return; }
-  if (tool === Tool.LINE || tool === Tool.ARC) {
+  if (tool === Tool.LINE || tool === Tool.ARC || tool === Tool.ELLIPSE) {
     // 線/円弧作図中: 右クリックで終了（AutoCAD準拠）
     drawingStart = null; arcState = { p1: null, p2: null }; previewShape = null;
     changeTool(Tool.SELECT); return;
@@ -1990,7 +2390,7 @@ stage.on('contextmenu', (event) => {
     copyState = null;
     changeTool(Tool.SELECT); return;
   }
-  if (tool === Tool.SCALE || tool === Tool.EXTEND || tool === Tool.ARRAY || tool === Tool.HATCH) {
+  if (tool === Tool.SCALE || tool === Tool.EXTEND || tool === Tool.ARRAY || tool === Tool.HATCH || tool === Tool.BREAK || tool === Tool.LENGTHEN || tool === Tool.CHAMFER) {
     arrayState = { base: null, source: null, count: arrayState.count };
     changeTool(Tool.SELECT); return;
   }
@@ -2158,10 +2558,15 @@ document.addEventListener('keydown', (event) => {
 
   // 2文字ショートカット（AutoCAD風）
   const chord = `${document._lastKey || ''}${lKey}`;
+  const chord3 = `${document._last2Key || ''}${document._lastKey || ''}${lKey}`;
   const hasSelection = selectedId || selectedIds.size > 0;
   if (chord === 'za') { fitView(); document._lastKey = ''; return; }
   if (chord === 'pl') { changeTool(Tool.POLYLINE); document._lastKey = ''; return; }
+  if (chord === 'el') { changeTool(Tool.ELLIPSE); document._lastKey = ''; return; }
   if (chord === 'tr') { changeTool(Tool.TRIM); document._lastKey = ''; return; }
+  if (chord === 'br') { changeTool(Tool.BREAK); document._lastKey = ''; document._last2Key = ''; return; }
+  if (chord3 === 'len') { changeTool(Tool.LENGTHEN); document._lastKey = ''; document._last2Key = ''; return; }
+  if (chord3 === 'cha') { changeTool(Tool.CHAMFER); document._lastKey = ''; document._last2Key = ''; return; }
   if (chord === 'ex') { changeTool(Tool.EXTEND); document._lastKey = ''; return; }
   if (chord === 'mi') { changeTool(Tool.MIRROR); document._lastKey = ''; return; }
   if (chord === 'jo') { changeTool(Tool.JOIN); document._lastKey = ''; return; }
@@ -2177,6 +2582,13 @@ document.addEventListener('keydown', (event) => {
   if (key === 'F7') { gridVisible = statusbar.toggleGrid(); redraw(); return; }
   // F9: スナップ切替
   if (key === 'F9') { snapMode = statusbar.toggleSnap(); return; }
+  // F11: 動的入力切替
+  if (key === 'F11') {
+    event.preventDefault();
+    const enabled = dynInput.toggle();
+    cmdline.addHistory(`動的入力: ${enabled ? 'ON' : 'OFF'}`, '#8aa8c0');
+    return;
+  }
 
   // ショートカットキー（ツール切替）
   if (lKey === 'l') { changeTool(Tool.LINE); return; }
@@ -2192,6 +2604,7 @@ document.addEventListener('keydown', (event) => {
   if (lKey === 'm' && hasSelection) { changeTool(Tool.MOVE); return; }
   if (lKey === 'r' && hasSelection) { changeTool(Tool.ROTATE); return; }
 
+  document._last2Key = document._lastKey || '';
   document._lastKey = lKey;
 });
 
@@ -2265,6 +2678,11 @@ function getGripPoints(shape) {
   if (shape.type === 'arc') return [
     { x: shape.cx, y: shape.cy },
   ];
+  if (shape.type === 'ellipse') return [
+    { x: shape.cx, y: shape.cy },
+    { x: shape.cx + shape.rx, y: shape.cy },
+    { x: shape.cx, y: shape.cy + shape.ry },
+  ];
   if (shape.type === 'rect') return [
     { x: shape.x,              y: shape.y              },
     { x: shape.x + shape.w,    y: shape.y              },
@@ -2314,6 +2732,10 @@ function applyGripMove(shape, gripIndex, mm) {
   } else if (shape.type === 'circle') {
     if (gripIndex === 0) { shape.cx = mm.x; shape.cy = mm.y; }
     else { shape.r = Math.max(0.1, Math.hypot(mm.x - shape.cx, mm.y - shape.cy)); }
+  } else if (shape.type === 'ellipse') {
+    if (gripIndex === 0) { shape.cx = mm.x; shape.cy = mm.y; }
+    else if (gripIndex === 1) { shape.rx = Math.max(0.1, Math.abs(mm.x - shape.cx)); }
+    else if (gripIndex === 2) { shape.ry = Math.max(0.1, Math.abs(mm.y - shape.cy)); }
   } else if (shape.type === 'rect') {
     if (gripIndex === 0) {
       const x2 = shape.x + shape.w, y2 = shape.y + shape.h;
@@ -2501,3 +2923,32 @@ document.addEventListener('keydown', (e) => {
 // 初期描画
 // ──────────────────────────────────────────────
 redraw();
+
+function pointAlongFromIntersection(line, inter, dist, clickPt) {
+  const p1 = { x: line.x1, y: line.y1 };
+  const p2 = { x: line.x2, y: line.y2 };
+  const nearP1 = Math.hypot(clickPt.x - p1.x, clickPt.y - p1.y) <= Math.hypot(clickPt.x - p2.x, clickPt.y - p2.y);
+  const target = nearP1 ? p1 : p2;
+  const vx = target.x - inter.x;
+  const vy = target.y - inter.y;
+  const len = Math.hypot(vx, vy) || 1;
+  return {
+    point: { x: inter.x + (vx / len) * dist, y: inter.y + (vy / len) * dist },
+    useP1: nearP1,
+  };
+}
+
+function pointToLineParam(line, point) {
+  const dx = line.x2 - line.x1;
+  const dy = line.y2 - line.y1;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq < 1e-9) return 0;
+  const t = ((point.x - line.x1) * dx + (point.y - line.y1) * dy) / lenSq;
+  return Math.max(0, Math.min(1, t));
+}
+
+function pointOnLineByT(line, t) {
+  return { x: line.x1 + (line.x2 - line.x1) * t, y: line.y1 + (line.y2 - line.y1) * t };
+}
+
+
