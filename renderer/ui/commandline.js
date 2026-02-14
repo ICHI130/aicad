@@ -35,6 +35,10 @@ const COMMAND_MAP = {
   'extend': 'extend',
   'f':    'fillet',
   'fillet': 'fillet',
+  'ar':   'array',
+  'array': 'array',
+  'h':    'hatch',
+  'hatch': 'hatch',
   'sc':   'scale',
   'scale': 'scale',
   'e':    'erase',
@@ -46,6 +50,9 @@ const COMMAND_MAP = {
   'redo': 'redo',
   'z':    'zoom',
   'za':   'zoomAll',
+  'p':    'print',
+  'print': 'print',
+  'plot': 'print',
   'dim':  'dim',
   'dli':  'dim',
   'dv':   'dim',
@@ -67,6 +74,8 @@ const TOOL_LABELS = {
   trim:     'トリム',
   extend:   '延長',
   fillet:   'フィレット',
+  array:    '配列複写',
+  hatch:    'ハッチ',
   scale:    '尺度',
   erase:    '削除',
   dim:      '寸法',
@@ -87,6 +96,8 @@ const TOOL_GUIDES = {
   mirror:   { 0: '鏡像軸の点1をクリック', 1: '鏡像軸の点2をクリック' },
   trim:     { 0: '切断境界の線をクリック [Enter:全て境界]', 1: '切断する部分をクリック [Esc:終了]' },
   fillet:   { 0: 'フィレット半径を入力 [Enter] (0=直角コーナー)', 1: '1本目の線をクリック', 2: '2本目の線をクリック' },
+  array:    { 0: '基点をクリック', 1: '配列方向点をクリック [数値入力で個数変更]' },
+  hatch:    { 0: '境界(矩形/円)をクリックしてハッチ作成' },
   dim:      { 0: '寸法の始点をクリック', 1: '寸法の終点をクリック', 2: '寸法線の位置をクリック' },
 };
 
@@ -97,8 +108,10 @@ const HELP_TEXT = `コマンド一覧:
   M    → 移動 (MOVE)         CO   → コピー
   RO   → 回転 (ROTATE)       MI   → 鏡像 (MIRROR)
   TR   → トリム               F    → フィレット
+  AR   → 配列複写             H    → ハッチ
   DIM  → 寸法                 U    → 元に戻す
-  ZA   → 全体表示             Esc  → キャンセル
+  PLOT → 印刷(PDF)            ZA   → 全体表示
+  Esc  → キャンセル
 
 座標入力:
   100,200    → 絶対座標 X=100, Y=200
@@ -188,6 +201,11 @@ export function initCommandLine({ onToolChange, onCoordInput, onSpecialCommand }
     if (toolId === 'erase') {
       addHistory('削除', '#8aa8c0');
       onSpecialCommand?.('erase');
+      return;
+    }
+    if (toolId === 'print') {
+      addHistory('印刷(PDF)', '#8aa8c0');
+      onSpecialCommand?.('print');
       return;
     }
 

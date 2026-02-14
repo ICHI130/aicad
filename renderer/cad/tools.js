@@ -5,15 +5,20 @@ export const Tool = {
   LINE: 'line',
   RECT: 'rect',
   CIRCLE: 'circle',
+  ARC: 'arc',
   POLYLINE: 'polyline',
   DIM: 'dim',
   MOVE: 'move',
   COPY: 'copy',
   ROTATE: 'rotate',
+  SCALE: 'scale',
   OFFSET: 'offset',
   MIRROR: 'mirror',
   TRIM: 'trim',
+  EXTEND: 'extend',
   FILLET: 'fillet',
+  ARRAY: 'array',
+  HATCH: 'hatch',
   TEXT: 'text',
 };
 
@@ -138,6 +143,57 @@ export function buildShapeNode(shape, viewport, options = {}) {
       fill: color,
     }));
     return group;
+  }
+
+
+  if (shape.type === 'hatch') {
+    const group = new Konva.Group({ id: shape.id, listening: !isPreview });
+    const spacing = Math.max(4, (shape.spacing || 120) * viewport.scale);
+    const colorHatch = isPreview ? COLOR_PREVIEW : (isSelected ? COLOR_SELECT : '#7fd68a');
+
+    if (shape.hatchKind === 'rect') {
+      const p = mmToScreen({ x: shape.x, y: shape.y }, viewport);
+      const w = shape.w * viewport.scale;
+      const h = shape.h * viewport.scale;
+      const clip = new Konva.Group({ clipX: p.x, clipY: p.y, clipWidth: w, clipHeight: h });
+      const len = Math.hypot(w, h) + 10;
+      for (let k = -h; k < w + h; k += spacing) {
+        clip.add(new Konva.Line({
+          points: [p.x + k, p.y + h, p.x + k + len, p.y - len],
+          stroke: colorHatch,
+          strokeWidth: 1,
+          opacity: 0.7,
+        }));
+      }
+      group.add(clip);
+      return group;
+    }
+
+    if (shape.hatchKind === 'circle') {
+      const c = mmToScreen({ x: shape.cx, y: shape.cy }, viewport);
+      const r = shape.r * viewport.scale;
+      const clip = new Konva.Group({
+        clipFunc(ctx) {
+          ctx.beginPath();
+          ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
+        },
+      });
+      const minX = c.x - r;
+      const maxX = c.x + r;
+      const minY = c.y - r;
+      const maxY = c.y + r;
+      const len = (maxY - minY) + (maxX - minX) + 20;
+      for (let k = -r * 2; k < r * 2; k += spacing) {
+        clip.add(new Konva.Line({
+          points: [minX + k, maxY, minX + k + len, minY - len],
+          stroke: colorHatch,
+          strokeWidth: 1,
+          opacity: 0.7,
+        }));
+      }
+      group.add(clip);
+      return group;
+    }
   }
 
   if (shape.type === 'text') {

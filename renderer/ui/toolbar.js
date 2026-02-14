@@ -1,47 +1,57 @@
 import { Tool } from '../cad/tools.js';
+import { onLanguageChange, t } from './i18n.js';
 
 const TOOL_DEFS = [
   // グループ: ファイル
-  { group: 'ファイル' },
-  { action: 'open',       icon: '📂', label: 'ファイルを開く', key: 'Ctrl+O' },
-  { action: 'export-dxf', icon: '💾', label: 'DXFで保存',     key: 'Ctrl+S' },
-  { action: 'fit',        icon: '⊡',  label: '全体表示',       key: 'F/ZA' },
+  { groupKey: 'toolbar_file' },
+  { action: 'open',       icon: '📂', labelKey: 'open_file', key: 'Ctrl+O' },
+  { action: 'export-dxf', icon: '💾', labelKey: 'save_dxf',  key: 'Ctrl+S' },
+  { action: 'print',      icon: '🖨', labelKey: 'print_pdf', key: 'Ctrl+P' },
+  { action: 'fit',        icon: '⊡',  labelKey: 'fit_view',  key: 'F/ZA' },
   // グループ: 操作
-  { group: '操作' },
-  { action: 'undo', icon: '↩', label: '元に戻す', key: 'Ctrl+Z' },
-  { action: 'redo', icon: '↪', label: 'やり直し', key: 'Ctrl+Y' },
+  { groupKey: 'toolbar_ops' },
+  { action: 'undo', icon: '↩', labelKey: 'undo', key: 'Ctrl+Z' },
+  { action: 'redo', icon: '↪', labelKey: 'redo', key: 'Ctrl+Y' },
   // グループ: 作図
-  { group: '作図' },
-  { id: Tool.SELECT,   icon: '▶', label: '選択',       key: 'S/Esc' },
-  { id: Tool.LINE,     icon: '╱', label: '線',         key: 'L' },
-  { id: Tool.RECT,     icon: '□', label: '矩形',       key: 'REC' },
-  { id: Tool.CIRCLE,   icon: '○', label: '円',         key: 'C' },
-  { id: Tool.POLYLINE, icon: '〜', label: 'ポリライン', key: 'PL' },
-  { id: Tool.TEXT,     icon: 'Ａ', label: '文字',       key: 'T' },
+  { groupKey: 'toolbar_draw' },
+  { id: Tool.SELECT,   icon: '▶', labelKey: 'select',   key: 'S/Esc' },
+  { id: Tool.LINE,     icon: '╱', labelKey: 'line',     key: 'L' },
+  { id: Tool.RECT,     icon: '□', labelKey: 'rect',     key: 'REC' },
+  { id: Tool.CIRCLE,   icon: '○', labelKey: 'circle',   key: 'C' },
+  { id: Tool.ARC,      icon: '◜', labelKey: 'arc',      key: 'A' },
+  { id: Tool.POLYLINE, icon: '〜', labelKey: 'polyline', key: 'PL' },
+  { id: Tool.TEXT,     icon: 'Ａ', labelKey: 'text',     key: 'T' },
   // グループ: 修正
-  { group: '修正' },
-  { id: Tool.MOVE,     icon: '↔', label: '移動',   key: 'M' },
-  { id: Tool.COPY,     icon: '⊕', label: 'コピー', key: 'CO' },
-  { id: Tool.ROTATE,   icon: '↻', label: '回転',   key: 'RO' },
-  { id: Tool.OFFSET,   icon: '∥', label: 'オフセット', key: 'O' },
-  { id: Tool.MIRROR,   icon: '⇌', label: '鏡像',   key: 'MI' },
-  { id: Tool.TRIM,     icon: '✂', label: 'トリム', key: 'TR' },
-  { id: Tool.FILLET,   icon: '⌐', label: 'フィレット', key: 'F' },
+  { groupKey: 'toolbar_modify' },
+  { id: Tool.MOVE,     icon: '↔', labelKey: 'move',   key: 'M' },
+  { id: Tool.COPY,     icon: '⊕', labelKey: 'copy',   key: 'CO' },
+  { id: Tool.ROTATE,   icon: '↻', labelKey: 'rotate', key: 'RO' },
+  { id: Tool.SCALE,    icon: '⇱', labelKey: 'scale', key: 'SC' },
+  { id: Tool.OFFSET,   icon: '∥', labelKey: 'offset', key: 'O' },
+  { id: Tool.MIRROR,   icon: '⇌', labelKey: 'mirror', key: 'MI' },
+  { id: Tool.TRIM,     icon: '✂', labelKey: 'trim', key: 'TR' },
+  { id: Tool.EXTEND,   icon: '⤢', labelKey: 'extend', key: 'EX' },
+  { id: Tool.FILLET,   icon: '⌐', labelKey: 'fillet', key: 'F' },
+  { id: Tool.ARRAY,    icon: '▦', labelKey: 'array', key: 'AR' },
+  { id: Tool.HATCH,    icon: '▒', labelKey: 'hatch', key: 'H' },
   // グループ: 注釈
-  { group: '注釈' },
-  { id: Tool.DIM, icon: '←→', label: '寸法', key: 'DIM' },
+  { groupKey: 'toolbar_annotate' },
+  { id: Tool.DIM, icon: '←→', labelKey: 'dim', key: 'DIM' },
 ];
 
-export function initToolbar({ onChangeTool, onOpenFile, onExportDxf, onUndo, onRedo, onFitView }) {
+
+export function initToolbar({ onChangeTool, onOpenFile, onExportDxf, onPrint, onUndo, onRedo, onFitView }) {
   const panel = document.getElementById('tool-panel');
   const buttons = [];
+  const translatedNodes = [];
 
   for (const def of TOOL_DEFS) {
     // グループラベル
-    if (def.group) {
+    if (def.groupKey) {
       const label = document.createElement('div');
       label.className = 'tool-group-label';
-      label.textContent = def.group;
+      label.textContent = t(def.groupKey);
+      translatedNodes.push({ el: label, key: def.groupKey });
       panel.appendChild(label);
       continue;
     }
@@ -53,12 +63,13 @@ export function initToolbar({ onChangeTool, onOpenFile, onExportDxf, onUndo, onR
     iconSpan.textContent = def.icon;
 
     const labelSpan = document.createElement('span');
-    labelSpan.textContent = def.label;
+    labelSpan.textContent = t(def.labelKey);
 
     const keySpan = document.createElement('span');
     keySpan.className = 'key-hint';
     keySpan.textContent = def.key;
 
+    translatedNodes.push({ el: labelSpan, key: def.labelKey });
     btn.appendChild(iconSpan);
     btn.appendChild(labelSpan);
     btn.appendChild(keySpan);
@@ -72,6 +83,8 @@ export function initToolbar({ onChangeTool, onOpenFile, onExportDxf, onUndo, onR
       btn.addEventListener('click', () => onOpenFile?.());
     } else if (def.action === 'export-dxf') {
       btn.addEventListener('click', () => onExportDxf?.());
+    } else if (def.action === 'print') {
+      btn.addEventListener('click', () => onPrint?.());
     } else if (def.action === 'undo') {
       btn.addEventListener('click', () => onUndo?.());
     } else if (def.action === 'redo') {
@@ -83,11 +96,18 @@ export function initToolbar({ onChangeTool, onOpenFile, onExportDxf, onUndo, onR
     panel.appendChild(btn);
   }
 
+  const disposeLang = onLanguageChange(() => {
+    for (const node of translatedNodes) node.el.textContent = t(node.key);
+  });
+
   return {
     setActive(toolId) {
       for (const button of buttons) {
         button.classList.toggle('active', button.dataset.toolId === toolId);
       }
+    },
+    dispose() {
+      disposeLang?.();
     },
   };
 }

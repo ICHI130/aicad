@@ -28,6 +28,73 @@
         gap: 2px;
       }
 
+
+      #layer-panel {
+        border: 1px solid #2b2f33;
+        border-radius: 4px;
+        padding: 6px;
+        margin: 2px 2px 8px;
+        background: #101419;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .layer-title { font-size: 11px; color: #8aa8c0; font-weight: bold; }
+      .layer-lang-row,
+      .layer-current-row,
+      .layer-create-row { display: flex; gap: 6px; align-items: center; }
+      .layer-lang-row label,
+      .layer-current-row label { font-size: 10px; color: #6a7480; min-width: 44px; }
+      .layer-lang-select,
+      .layer-current-select,
+      .layer-name-input {
+        flex: 1;
+        background: #0b0d10;
+        border: 1px solid #3a4450;
+        color: #e8e8e8;
+        border-radius: 3px;
+        font-size: 11px;
+        padding: 2px 4px;
+      }
+      .layer-add-btn {
+        border: 1px solid #3f464d;
+        background: #1b2026;
+        color: #e8e8e8;
+        border-radius: 3px;
+        font-size: 11px;
+        padding: 3px 6px;
+        cursor: pointer;
+      }
+      .layer-list-header,
+      .layer-row {
+        display: grid;
+        grid-template-columns: 1fr 28px 28px;
+        gap: 4px;
+        align-items: center;
+      }
+      .layer-list-header { font-size: 9px; color: #6a7480; }
+      .layer-list { display: flex; flex-direction: column; gap: 2px; max-height: 140px; overflow: auto; }
+      .layer-name-btn {
+        border: 1px solid #2f3740;
+        background: #151a20;
+        color: #d8e2ee;
+        border-radius: 3px;
+        padding: 2px 4px;
+        font-size: 10px;
+        text-align: left;
+        cursor: pointer;
+      }
+      .layer-row.active .layer-name-btn { border-color: #4da6ff; color: #4da6ff; }
+      .layer-toggle {
+        border: 1px solid #2f3740;
+        background: #151a20;
+        color: #d8e2ee;
+        border-radius: 3px;
+        padding: 1px;
+        font-size: 11px;
+        cursor: pointer;
+      }
+      .layer-toggle.off { opacity: 0.55; }
       .tool-group-label {
         font-size: 9px;
         color: #6a7480;
@@ -291,7 +358,9 @@
   <body>
     <div class="layout">
       <!-- 左縦ツールパネル -->
-      <div id="tool-panel"></div>
+      <div id="tool-panel">
+        <div id="layer-panel"></div>
+      </div>
 
       <!-- CADキャンバス -->
       <div id="cad-root">
@@ -308,6 +377,7 @@
         <div class="ctx-sep"></div>
         <div class="ctx-item" data-action="move"><span>↔</span>移動<span class="ctx-key">M</span></div>
         <div class="ctx-item" data-action="rotate"><span>↻</span>回転<span class="ctx-key">RO</span></div>
+        <div class="ctx-item" data-action="scale"><span>⇱</span>尺度変更<span class="ctx-key">SC</span></div>
         <div class="ctx-item" data-action="mirror"><span>⇌</span>鏡像<span class="ctx-key">MI</span></div>
         <div class="ctx-item" data-action="offset"><span>∥</span>オフセット<span class="ctx-key">O</span></div>
         <div class="ctx-sep"></div>

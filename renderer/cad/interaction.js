@@ -1,6 +1,6 @@
 import { Tool } from './tools.js';
 
-export function buildPreviewShape({ tool, drawingStart, point, polylinePoints, dimState, normalizeRect }) {
+export function buildPreviewShape({ tool, drawingStart, point, polylinePoints, dimState, arcState, arrayState, normalizeRect, arcFromThreePoints, cloneWithOffset }) {
   if (tool === Tool.LINE && drawingStart) {
     return { type: 'line', x1: drawingStart.x, y1: drawingStart.y, x2: point.x, y2: point.y };
   }
@@ -12,6 +12,15 @@ export function buildPreviewShape({ tool, drawingStart, point, polylinePoints, d
 
   if (tool === Tool.CIRCLE && drawingStart) {
     return { type: 'circle', cx: drawingStart.x, cy: drawingStart.y, r: Math.hypot(point.x - drawingStart.x, point.y - drawingStart.y) };
+  }
+
+
+  if (tool === Tool.ARC && arcState?.p1 && arcState?.p2) {
+    return arcFromThreePoints(arcState.p1, arcState.p2, point);
+  }
+
+  if (tool === Tool.ARRAY && arrayState?.base && arrayState?.source) {
+    return cloneWithOffset(arrayState.source, point.x - arrayState.base.x, point.y - arrayState.base.y);
   }
 
   if (tool === Tool.POLYLINE && polylinePoints.length) {
