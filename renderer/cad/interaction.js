@@ -1,6 +1,6 @@
 import { Tool } from './tools.js';
 
-export function buildPreviewShape({ tool, drawingStart, point, polylinePoints, dimState, arcState, ellipseState, arrayState, normalizeRect, arcFromThreePoints, cloneWithOffset }) {
+export function buildPreviewShape({ tool, drawingStart, point, polylinePoints, dimState, mleaderState, arcState, ellipseState, arrayState, normalizeRect, arcFromThreePoints, cloneWithOffset }) {
   if (tool === Tool.LINE && drawingStart) {
     return { type: 'line', x1: drawingStart.x, y1: drawingStart.y, x2: point.x, y2: point.y };
   }
@@ -43,6 +43,20 @@ export function buildPreviewShape({ tool, drawingStart, point, polylinePoints, d
       const offset = dir === 'h' ? point.y - dimState.p1.y : point.x - dimState.p1.x;
       return { type: 'dim', x1: dimState.p1.x, y1: dimState.p1.y, x2: dimState.p2.x, y2: dimState.p2.y, offset, dir };
     }
+  }
+
+  if (tool === Tool.MLEADER && mleaderState?.p1 && mleaderState?.p2) {
+    return {
+      type: 'mleader',
+      x1: mleaderState.p1.x,
+      y1: mleaderState.p1.y,
+      x2: mleaderState.p2.x,
+      y2: mleaderState.p2.y,
+      x3: point.x,
+      y3: point.y,
+      text: mleaderState.text || '注記',
+      textHeight: mleaderState.textHeight || 2.5,
+    };
   }
 
   return null;

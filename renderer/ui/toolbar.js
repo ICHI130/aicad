@@ -40,6 +40,7 @@ const TOOL_DEFS = [
   // グループ: 注釈
   { groupKey: 'toolbar_annotate' },
   { id: Tool.DIM, icon: '←→', labelKey: 'dim', key: 'DIM' },
+  { id: Tool.MLEADER, icon: '↗T', labelKey: 'mleader', key: 'ML' },
 ];
 
 

@@ -72,6 +72,8 @@ const COMMAND_MAP = {
   'dim':  'dim',
   'dli':  'dim',
   'dv':   'dim',
+  'ml':   'mleader',
+  'mleader': 'mleader',
 };
 
 const TOOL_LABELS = {
@@ -101,6 +103,7 @@ const TOOL_LABELS = {
   scale:    '尺度',
   erase:    '削除',
   dim:      '寸法',
+  mleader:  '引出線',
 };
 
 const TOOL_GUIDES = {
@@ -127,6 +130,7 @@ const TOOL_GUIDES = {
   array:    { 0: '基点をクリック', 1: '配列方向点をクリック [数値入力で個数変更]' },
   hatch:    { 0: '境界(矩形/円)をクリックしてハッチ作成' },
   dim:      { 0: '寸法の始点をクリック', 1: '寸法の終点をクリック', 2: '寸法線の位置をクリック' },
+  mleader:  { 0: '矢印先端をクリック', 1: '引出線の折点をクリック', 2: '注記位置をクリック' },
 };
 
 const HELP_TEXT = `コマンド一覧:
@@ -141,7 +145,8 @@ const HELP_TEXT = `コマンド一覧:
   TR   → トリム
   F    → フィレット
   AR   → 配列複写             H    → ハッチ
-  DIM  → 寸法                 U    → 元に戻す
+  DIM  → 寸法                 ML   → 引出線
+  U    → 元に戻す
   AUDIT→ 監査ログ              CMP  → 直前差分
   PLOT → 印刷(PDF)            ZA   → 全体表示
   Esc  → キャンセル

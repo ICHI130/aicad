@@ -21,6 +21,7 @@ const TOOL_NAMES = {
   scale:    '尺度',
   erase:    '削除',
   dim:      '寸法',
+  mleader:  '引出線',
 };
 
 
@@ -59,6 +60,7 @@ const TOOL_GUIDES = {
   array:    { 0: '基点をクリック', 1: '配列方向点をクリック' },
   hatch:    { 0: '境界(矩形/円)をクリックしてハッチ作成' },
   dim:      { 0: '始点をクリック', 1: '終点をクリック', 2: '寸法線の位置をクリック' },
+  mleader:  { 0: '矢印先端をクリック', 1: '引出線の折点をクリック', 2: '注記位置をクリック' },
 };
 
 export function initStatusbar({ onOrthoChange, onSnapChange, onGridChange } = {}) {
