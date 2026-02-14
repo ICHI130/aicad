@@ -1,6 +1,7 @@
 import { getLineTypeOptions } from '../cad/linetypes.js';
 
 const WIDTH_OPTIONS = [0.13, 0.18, 0.25, 0.35, 0.5, 0.7, 1.0];
+const BY_LAYER = 'BYLAYER';
 
 // AutoCAD標準8色 + カスタム枠（9番目）
 const PRESET_COLORS = [
@@ -25,9 +26,12 @@ function findPresetIndex(color) {
 }
 
 function buildColorPaletteHtml(selectedColor, customColor) {
+  const isByLayer = !selectedColor || selectedColor === BY_LAYER;
   const presetIdx = findPresetIndex(selectedColor);
-  const isCustom = presetIdx === -1;
+  const isCustom = !isByLayer && presetIdx === -1;
   const customDisplay = isCustom ? (selectedColor || customColor || '#00bfff') : (customColor || '#00bfff');
+
+  const byLayer = `<div class="color-swatch ${isByLayer ? 'active' : ''}" data-color="${BY_LAYER}" title="ByLayer"><span style="font-size:10px;line-height:1">BL</span></div>`;
 
   const swatches = PRESET_COLORS.map((c, i) => {
     const active = presetIdx === i ? 'active' : '';
@@ -41,8 +45,8 @@ function buildColorPaletteHtml(selectedColor, customColor) {
       <input type="color" id="prop-color-custom" value="${customDisplay}" style="opacity:0;position:absolute;width:100%;height:100%;top:0;left:0;cursor:pointer;" />
     </div>`;
 
-  return `<div class="color-palette">${swatches}${customSwatch}</div>
-    <input type="hidden" id="prop-color" value="${isCustom ? customDisplay : selectedColor || '#00bfff'}" />`;
+  return `<div class="color-palette">${byLayer}${swatches}${customSwatch}</div>
+    <input type="hidden" id="prop-color" value="${isByLayer ? BY_LAYER : (isCustom ? customDisplay : selectedColor || BY_LAYER)}" />`;
 }
 
 export function initPropertyPanel({ getSelection, getLayers, onApply }) {
@@ -57,9 +61,9 @@ export function initPropertyPanel({ getSelection, getLayers, onApply }) {
     const commonSingle = selected.length === 1;
 
     const patch = {
-      color: root.querySelector('#prop-color')?.value,
-      linetype: root.querySelector('#prop-linetype')?.value,
-      linewidth: toNum(root.querySelector('#prop-linewidth')?.value, 0.25),
+      color: root.querySelector('#prop-color')?.value || BY_LAYER,
+      linetype: root.querySelector('#prop-linetype')?.value || BY_LAYER,
+      linewidth: root.querySelector('#prop-linewidth')?.value === BY_LAYER ? BY_LAYER : toNum(root.querySelector('#prop-linewidth')?.value, 0.25),
       layerId: root.querySelector('#prop-layer')?.value,
     };
 
@@ -117,10 +121,10 @@ export function initPropertyPanel({ getSelection, getLayers, onApply }) {
 
     const layerOptions = getLayers().map((l) => `<option value="${l.id}">${l.name}</option>`).join('');
     const lineTypeOptions = lineTypes.map((lt) => `<option value="${lt.id}">${lt.label}</option>`).join('');
-    const widthOptions = WIDTH_OPTIONS.map((w) => `<option value="${w}">${w}mm</option>`).join('');
+    const widthOptions = [`<option value="${BY_LAYER}">ByLayer</option>`, ...WIDTH_OPTIONS.map((w) => `<option value="${w}">${w}mm</option>`)].join('');
 
-    const currentColor = first.color || '#00bfff';
-    const colorPaletteHtml = buildColorPaletteHtml(currentColor, currentColor);
+    const currentColor = first.color || BY_LAYER;
+    const colorPaletteHtml = buildColorPaletteHtml(currentColor, '#00bfff');
 
     root.innerHTML = `
       <div class="prop-header"><span>プロパティ</span></div>
@@ -134,8 +138,8 @@ export function initPropertyPanel({ getSelection, getLayers, onApply }) {
       <div id="prop-geo"></div>
     `;
 
-    root.querySelector('#prop-linetype').value = first.linetype || 'CONTINUOUS';
-    root.querySelector('#prop-linewidth').value = String(first.linewidth ?? 0.25);
+    root.querySelector('#prop-linetype').value = first.linetype || BY_LAYER;
+    root.querySelector('#prop-linewidth').value = first.linewidth === BY_LAYER ? BY_LAYER : String(first.linewidth ?? BY_LAYER);
     root.querySelector('#prop-layer').value = first.layerId || 'default';
 
     // 共通プロパティのリアルタイムバインド

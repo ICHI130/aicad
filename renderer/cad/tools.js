@@ -35,13 +35,28 @@ export const Tool = {
 const COLOR_PREVIEW = '#ffff00';  // 黄色（作図中プレビュー)
 const COLOR_SELECT  = '#ff4444';  // 赤（選択中）
 
+
+function resolveLinewidth(shapeLinewidth, layerLinewidth) {
+  const fromShape = Number(shapeLinewidth);
+  if (Number.isFinite(fromShape) && fromShape > 0) return fromShape;
+  const fromLayer = Number(layerLinewidth);
+  if (Number.isFinite(fromLayer) && fromLayer > 0) return fromLayer;
+  return 0.25;
+}
+
+function resolveLinetype(shapeLinetype, layerLinetype) {
+  const normalized = String(shapeLinetype || '').toUpperCase();
+  if (!normalized || normalized === 'BYLAYER') return layerLinetype || 'CONTINUOUS';
+  return shapeLinetype;
+}
+
 export function buildShapeNode(shape, viewport, options = {}) {
   const { isPreview = false, isSelected = false, layerStyle = null } = options;
 
-  const resolvedLinewidth = Number(shape.linewidth ?? layerStyle?.linewidth ?? 0.25);
+  const resolvedLinewidth = resolveLinewidth(shape.linewidth, layerStyle?.linewidth);
   const sw = Math.max(1, resolvedLinewidth * viewport.scale);
   const color = isPreview ? COLOR_PREVIEW : isSelected ? COLOR_SELECT : resolveShapeColor(shape, layerStyle);
-  const linetype = shape.linetype || layerStyle?.linetype || 'CONTINUOUS';
+  const linetype = resolveLinetype(shape.linetype, layerStyle?.linetype);
   const dash = isPreview ? [8, 4] : getDashPattern(linetype, viewport.scale);
 
   if (shape.type === 'line') {
