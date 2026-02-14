@@ -147,12 +147,13 @@ const HELP_TEXT = `コマンド一覧:
   @100<45    → 極座標 距離100mm, 角度45°
   100        → 現在方向に100mm`;
 
-export function initCommandLine({ onToolChange, onCoordInput, onSpecialCommand }) {
+export function initCommandLine({ onToolChange, onCoordInput, onSpecialCommand, onOptionInput }) {
   const historyEl = document.getElementById('cmdline-history');
   const labelEl = document.getElementById('cmdline-label');
   const inputEl = document.getElementById('cmdline-input');
 
   const historyLines = [];
+  let activeToolId = 'select';
 
   function addHistory(text, color = null) {
     historyLines.push({ text, color });
@@ -185,8 +186,33 @@ export function initCommandLine({ onToolChange, onCoordInput, onSpecialCommand }
     if (!guide) { setLabel('コマンド:'); return; }
     if (typeof guide === 'string') { setLabel(`[${TOOL_LABELS[toolId] || toolId}]`); return; }
     const stepGuide = guide[step] || guide[0] || '';
-    setLabel(`[${TOOL_LABELS[toolId] || toolId}] ${stepGuide.split('[')[0].trim()}:`);
+    setLabel(`[${TOOL_LABELS[toolId] || toolId}] ${stepGuide}:`);
   }
+
+  const OPTION_ALIASES = {
+    polyline: {
+      c: 'close',
+      close: 'close',
+      u: 'undo',
+      undo: 'undo',
+    },
+    trim: {
+      a: 'all',
+      all: 'all',
+    },
+    extend: {
+      a: 'all',
+      all: 'all',
+    },
+    dim: {
+      r: 'radius',
+      radius: 'radius',
+      d: 'diameter',
+      diameter: 'diameter',
+      l: 'linear',
+      linear: 'linear',
+    },
+  };
 
   inputEl.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
@@ -244,6 +270,16 @@ export function initCommandLine({ onToolChange, onCoordInput, onSpecialCommand }
       return;
     }
 
+    // オプション入力（C/U など）
+    const optionMap = OPTION_ALIASES[activeToolId || ''];
+    if (optionMap && optionMap[lower]) {
+      const accepted = onOptionInput?.({ toolId: activeToolId, option: optionMap[lower], raw });
+      if (accepted) {
+        addHistory(`オプション: ${raw.toUpperCase()} → ${optionMap[lower]}`, '#8aa8c0');
+        return;
+      }
+    }
+
     // 座標・数値入力（数値/座標形式なら onCoordInput へ）
     if (/^[@]?[-\d.]/.test(raw) || /^[-\d.]+,[-\d.]+$/.test(raw)) {
       addHistory(`入力: ${raw}`, '#ffdd66');
@@ -269,6 +305,9 @@ export function initCommandLine({ onToolChange, onCoordInput, onSpecialCommand }
   return {
     addHistory,
     setPrompt,
+    setActiveTool(toolId) {
+      activeToolId = toolId;
+    },
     setLabel,
     focus() { inputEl.focus(); },
     blur() { inputEl.blur(); },

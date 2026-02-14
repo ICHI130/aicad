@@ -372,32 +372,19 @@ function changeTool(nextTool) {
   toolbar.setActive(tool);
   statusbar.setTool(tool);
   statusbar.setGuide(tool, 0);
+  cmdline.setActiveTool(tool);
   redraw();
 
   // ツール別の初期メッセージ
   if (tool === Tool.OFFSET) {
     cmdline.setLabel('[オフセット] 距離を入力 [Enter]:');
     statusbar.setCustomGuide('オフセット距離を入力してEnter');
-  } else if (tool === Tool.LENGTHEN || tool === Tool.CHAMFER) {
-    const num = parseFloat(str);
-    if (!isNaN(num) && num !== 0) {
-      lengthenState.delta = num;
-      cmdline.setLabel(`[長さ変更] 線分端をクリック (Δ${num}mm):`);
-      statusbar.setGuide(tool, 1);
-    }
+  } else if (tool === Tool.LENGTHEN) {
+    cmdline.setLabel('[長さ変更] 増減長さを入力 [Enter]:');
+    statusbar.setCustomGuide('長さ変更量を入力して線分端をクリック');
   } else if (tool === Tool.CHAMFER) {
-    const parts = str.split(',').map((v) => parseFloat(v.trim())).filter((v) => !isNaN(v));
-    if (parts.length === 1 && parts[0] > 0) {
-      chamferState.d1 = parts[0];
-      chamferState.d2 = parts[0];
-    } else if (parts.length >= 2 && parts[0] > 0 && parts[1] > 0) {
-      chamferState.d1 = parts[0];
-      chamferState.d2 = parts[1];
-    }
-    if (chamferState.d1 !== null && chamferState.d2 !== null) {
-      cmdline.setLabel(`[面取り] 1本目の線をクリック (d1=${chamferState.d1}, d2=${chamferState.d2})`);
-      statusbar.setGuide(tool, 1);
-    }
+    cmdline.setLabel('[面取り] 距離を入力 [Enter] (d または d1,d2):');
+    statusbar.setCustomGuide('面取り距離を入力して2線を選択');
   } else if (tool === Tool.FILLET) {
     cmdline.setLabel('[フィレット] 半径を入力 [Enter] (0=直角):');
     statusbar.setCustomGuide('フィレット半径を入力してEnter');
@@ -526,6 +513,9 @@ const cmdline = initCommandLine({
   onCoordInput(str) {
     handleCmdlineCoord(str);
   },
+  onOptionInput({ toolId, option }) {
+    return handleCommandOption(toolId, option);
+  },
   onSpecialCommand(cmd) {
     if (cmd === 'escape') escapeCurrentTool();
     else if (cmd === 'undo') undo();
@@ -535,6 +525,7 @@ const cmdline = initCommandLine({
     else if (cmd === 'print') printCurrentViewAsPdf();
   },
 });
+cmdline.setActiveTool(tool);
 
 initDimStyleControls();
 
@@ -1294,6 +1285,7 @@ function escapeCurrentTool() {
   toolbar.setActive(tool);
   statusbar.setTool(tool);
   statusbar.setGuide(tool, 0);
+  cmdline.setActiveTool(tool);
   cmdline.setLabel('コマンド:');
   dynInput.hide();
   redraw();
@@ -1315,6 +1307,61 @@ function deleteSelected() {
 // ──────────────────────────────────────────────
 // コマンドライン座標入力処理
 // ──────────────────────────────────────────────
+function handleCommandOption(toolId, option) {
+  if (toolId === Tool.POLYLINE) {
+    if (option === 'close') {
+      if (polylinePoints.length > 2) {
+        finishPolyline(true);
+        return true;
+      }
+      return false;
+    }
+    if (option === 'undo') {
+      if (polylinePoints.length > 1) {
+        polylinePoints.pop();
+        statusbar.setGuide(tool, polylinePoints.length ? 1 : 0);
+        redraw();
+        return true;
+      }
+      return false;
+    }
+  }
+
+  if (toolId === Tool.TRIM && option === 'all' && trimState.phase === 0) {
+    trimState.boundaries = [];
+    trimState.phase = 1;
+    cmdline.addHistory('境界: 全図形を対象', '#8aa8c0');
+    cmdline.addHistory('切断する部分をクリック [Esc:終了]', '#8aa8c0');
+    cmdline.setPrompt(tool, 1);
+    statusbar.setCustomGuide('切断する側をクリック（Escで終了）');
+    redraw();
+    return true;
+  }
+
+  if (toolId === Tool.EXTEND && option === 'all' && extendState.phase === 0) {
+    extendState.boundaries = [];
+    extendState.phase = 1;
+    cmdline.addHistory('境界: 全図形を対象', '#8aa8c0');
+    cmdline.addHistory('延長する線をクリック [Esc:終了]', '#8aa8c0');
+    cmdline.setPrompt(tool, 1);
+    statusbar.setCustomGuide('延長する側をクリック（Escで終了）');
+    redraw();
+    return true;
+  }
+
+  if (toolId === Tool.DIM && dimState.mode !== option && ['linear', 'radius', 'diameter'].includes(option)) {
+    dimState = { p1: null, p2: null, circle: null, mode: option };
+    if (option === 'radius') cmdline.setLabel('[寸法] 半径寸法: 円をクリック');
+    else if (option === 'diameter') cmdline.setLabel('[寸法] 直径寸法: 円をクリック');
+    else cmdline.setLabel('[寸法] 線形寸法: 始点をクリック');
+    statusbar.setGuide(Tool.DIM, 0);
+    redraw();
+    return true;
+  }
+
+  return false;
+}
+
 function handleCmdlineCoord(str) {
   // ツール状態に応じて座標を解釈
   if (tool === Tool.DIM) {
