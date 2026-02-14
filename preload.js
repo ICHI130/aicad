@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('aiBridge', {
 
 contextBridge.exposeInMainWorld('cadBridge', {
   openFile: () => ipcRenderer.invoke('cad:open-file'),
+  saveDxf: (content) => ipcRenderer.invoke('cad:save-dxf', content),
   onMenuOpenFile: (callback) => {
     const listener = () => callback();
     ipcRenderer.on('menu:open-file', listener);

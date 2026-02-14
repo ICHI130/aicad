@@ -4,6 +4,11 @@ export const Tool = {
   SELECT: 'select',
   LINE: 'line',
   RECT: 'rect',
+  CIRCLE: 'circle',
+  POLYLINE: 'polyline',
+  DIM: 'dim',
+  MOVE: 'move',
+  ROTATE: 'rotate',
 };
 
 // AutoCAD風カラー
@@ -48,6 +53,85 @@ export function buildShapeNode(shape, viewport, options = {}) {
       id: shape.id,
       listening: !isPreview,
     });
+  }
+
+  if (shape.type === 'circle') {
+    const c = mmToScreen({ x: shape.cx, y: shape.cy }, viewport);
+    return new Konva.Circle({
+      x: c.x,
+      y: c.y,
+      radius: shape.r * viewport.scale,
+      stroke: color,
+      strokeWidth: sw,
+      fill: 'transparent',
+      dash: isPreview ? [8, 4] : undefined,
+      id: shape.id,
+      listening: !isPreview,
+    });
+  }
+
+  if (shape.type === 'polyline_preview') {
+    const points = [];
+    for (const point of shape.points) {
+      const p = mmToScreen(point, viewport);
+      points.push(p.x, p.y);
+    }
+    return new Konva.Line({
+      points,
+      stroke: color,
+      strokeWidth: sw,
+      dash: [8, 4],
+      id: shape.id,
+      listening: false,
+    });
+  }
+
+  if (shape.type === 'dim') {
+    const group = new Konva.Group({ listening: !isPreview, id: shape.id });
+    const vertical = shape.dir === 'v';
+    const isAligned = shape.dir === 'a';
+    const p1 = { x: shape.x1, y: shape.y1 };
+    const p2 = { x: shape.x2, y: shape.y2 };
+    const off = shape.offset || 10;
+    let d1 = { ...p1 };
+    let d2 = { ...p2 };
+
+    if (vertical) {
+      d1.x += off;
+      d2.x += off;
+    } else if (isAligned) {
+      const vx = p2.x - p1.x;
+      const vy = p2.y - p1.y;
+      const len = Math.hypot(vx, vy) || 1;
+      const nx = -vy / len;
+      const ny = vx / len;
+      d1 = { x: p1.x + nx * off, y: p1.y + ny * off };
+      d2 = { x: p2.x + nx * off, y: p2.y + ny * off };
+    } else {
+      d1.y += off;
+      d2.y += off;
+    }
+
+    const p1s = mmToScreen(p1, viewport);
+    const p2s = mmToScreen(p2, viewport);
+    const d1s = mmToScreen(d1, viewport);
+    const d2s = mmToScreen(d2, viewport);
+
+    group.add(new Konva.Line({ points: [p1s.x, p1s.y, d1s.x, d1s.y], stroke: color, strokeWidth: sw }));
+    group.add(new Konva.Line({ points: [p2s.x, p2s.y, d2s.x, d2s.y], stroke: color, strokeWidth: sw }));
+    group.add(new Konva.Arrow({ points: [d1s.x, d1s.y, d2s.x, d2s.y], stroke: color, fill: color, strokeWidth: sw, pointerLength: 8, pointerWidth: 6 }));
+    group.add(new Konva.Arrow({ points: [d2s.x, d2s.y, d1s.x, d1s.y], stroke: color, fill: color, strokeWidth: sw, pointerLength: 8, pointerWidth: 6 }));
+
+    const dist = Math.hypot(shape.x2 - shape.x1, shape.y2 - shape.y1);
+    const mid = mmToScreen({ x: (d1.x + d2.x) / 2, y: (d1.y + d2.y) / 2 }, viewport);
+    group.add(new Konva.Text({
+      x: mid.x + 4,
+      y: mid.y - 16,
+      text: `${Math.round(dist)} mm`,
+      fontSize: Math.max(10, 10 * viewport.scale),
+      fill: color,
+    }));
+    return group;
   }
 
   if (shape.type === 'text') {
