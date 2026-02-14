@@ -19,6 +19,16 @@ const TOOL_NAMES = {
   dim:      '寸法',
 };
 
+
+const SNAP_LABELS = {
+  endpoint: 'END',
+  midpoint: 'MID',
+  intersection: 'INT',
+  quadrant: 'QUA',
+  grid: 'GRID',
+  off: 'OFF',
+};
+
 const TOOL_GUIDES = {
   select:   '図形をクリックして選択',
   line:     { 0: '始点をクリック または 座標入力', 1: '終点をクリック または 長さ入力 [Enter]' },
@@ -41,6 +51,7 @@ export function initStatusbar({ onOrthoChange, onSnapChange, onGridChange } = {}
   const cursorEl = document.getElementById('cursor-pos');
   const toolEl = document.getElementById('status-tool');
   const guideEl = document.getElementById('status-guide');
+  const snapEl = document.getElementById('status-snap');
   const orthoBtn = document.getElementById('btn-ortho');
   const snapBtn = document.getElementById('btn-snap');
   const gridBtn = document.getElementById('btn-grid');
@@ -74,8 +85,12 @@ export function initStatusbar({ onOrthoChange, onSnapChange, onGridChange } = {}
   });
 
   return {
-    updateCursor(point) {
+    updateCursor(point, snapType = 'grid', snapEnabled = true) {
       if (cursorEl) cursorEl.textContent = `X: ${Math.round(point.x)} mm, Y: ${Math.round(point.y)} mm`;
+      if (snapEl) {
+        const key = snapEnabled ? (SNAP_LABELS[snapType] ? snapType : 'grid') : 'off';
+        snapEl.textContent = `SNAP: ${SNAP_LABELS[key]}`;
+      }
     },
     setTool(toolId) {
       const name = TOOL_NAMES[toolId] || toolId;
@@ -100,6 +115,7 @@ export function initStatusbar({ onOrthoChange, onSnapChange, onGridChange } = {}
     toggleSnap(on) {
       snapOn = (on !== undefined) ? on : !snapOn;
       updateModeBtn(snapBtn, snapOn);
+      if (snapEl && !snapOn) snapEl.textContent = `SNAP: ${SNAP_LABELS.off}`;
       return snapOn;
     },
     toggleGrid(on) {
