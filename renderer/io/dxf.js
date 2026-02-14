@@ -220,6 +220,10 @@ export function dxfEntitiesToShapes(entities) {
       return [{ type: 'arc', cx: entity.cx, cy: entity.cy, r: entity.r,
                 startAngle: entity.startAngle || 0, endAngle: entity.endAngle || 360 }];
     }
+    if (entity.type === 'CIRCLE') {
+      if (!isFinite(entity.cx) || !isFinite(entity.cy) || !isFinite(entity.r)) return [];
+      return [{ type: 'circle', cx: entity.cx, cy: entity.cy, r: entity.r }];
+    }
     if (entity.type === 'TEXT') {
       if (!entity.text) return [];
       // アライメント点がある場合はそちらを使う
@@ -241,4 +245,22 @@ export function dxfEntitiesToShapes(entities) {
     }
     return [];
   });
+}
+
+
+export function exportDxf(shapes) {
+  const lines = ['0', 'SECTION', '2', 'ENTITIES'];
+  for (const s of shapes) {
+    if (s.type === 'line') {
+      lines.push('0','LINE','8','0','10',String(s.x1),'20',String(s.y1),'30','0','11',String(s.x2),'21',String(s.y2),'31','0');
+    } else if (s.type === 'circle') {
+      lines.push('0','CIRCLE','8','0','10',String(s.cx),'20',String(s.cy),'30','0','40',String(s.r));
+    } else if (s.type === 'arc') {
+      lines.push('0','ARC','8','0','10',String(s.cx),'20',String(s.cy),'30','0','40',String(s.r),'50',String(s.startAngle || 0),'51',String(s.endAngle || 0));
+    } else if (s.type === 'text') {
+      lines.push('0','TEXT','8','0','10',String(s.x),'20',String(s.y),'30','0','40',String(s.height || 2.5),'1',String(s.text || ''));
+    }
+  }
+  lines.push('0','ENDSEC','0','EOF');
+  return lines.join('\n');
 }

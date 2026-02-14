@@ -71,6 +71,16 @@ ipcMain.handle('cad:open-file', async () => {
   return { canceled: false, filePath, content: null, base64, isBinary: false, isDxf: true };
 });
 
+
+ipcMain.handle('cad:save-dxf', async (_event, content) => {
+  const { filePath, canceled } = await dialog.showSaveDialog({
+    filters: [{ name: 'DXF', extensions: ['dxf'] }],
+  });
+  if (canceled || !filePath) return { canceled: true };
+  await fs.writeFile(filePath, content, 'utf8');
+  return { canceled: false, filePath };
+});
+
 ipcMain.handle('ai:set-claude-api-key', (_event, apiKey) => {
   claudeApiKey = typeof apiKey === 'string' ? apiKey.trim() : '';
   return { ok: true, configured: Boolean(claudeApiKey) };
