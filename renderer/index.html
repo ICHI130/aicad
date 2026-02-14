@@ -68,7 +68,7 @@
       .layer-list-header,
       .layer-row {
         display: grid;
-        grid-template-columns: 1fr 28px 28px;
+        grid-template-columns: 1fr 40px 96px 28px 28px;
         gap: 4px;
         align-items: center;
       }
@@ -85,6 +85,24 @@
         cursor: pointer;
       }
       .layer-row.active .layer-name-btn { border-color: #4da6ff; color: #4da6ff; }
+
+      .layer-color-input {
+        width: 100%;
+        height: 22px;
+        border: 1px solid #2f3740;
+        background: #151a20;
+        border-radius: 3px;
+        padding: 0;
+      }
+      .layer-linetype-select {
+        width: 100%;
+        background: #0b0d10;
+        border: 1px solid #3a4450;
+        color: #d8e2ee;
+        border-radius: 3px;
+        font-size: 10px;
+        padding: 2px;
+      }
       .layer-toggle {
         border: 1px solid #2f3740;
         background: #151a20;
@@ -139,6 +157,40 @@
       }
 
       /* サイドバー（AI チャット）*/
+
+      #property-panel {
+        display: none;
+        border-bottom: 1px solid #2b2f33;
+        padding: 8px;
+        background: #11161c;
+      }
+      .prop-header { font-size: 12px; color: #9ecbff; margin-bottom: 6px; font-weight: bold; }
+      .prop-grid, .prop-geo-grid {
+        display: grid;
+        grid-template-columns: 52px 1fr;
+        gap: 4px 6px;
+        align-items: center;
+        margin-bottom: 8px;
+      }
+      .prop-grid input, .prop-grid select, .prop-geo-grid input {
+        width: 100%;
+        background: #0f1216;
+        border: 1px solid #343a40;
+        color: #e8e8e8;
+        border-radius: 3px;
+        font-size: 11px;
+        padding: 3px 5px;
+      }
+      .prop-note { font-size: 11px; color: #8aa8c0; margin-bottom: 8px; }
+      #prop-apply {
+        width: 100%;
+        border: 1px solid #3f464d;
+        background: #1b2026;
+        color: #e8e8e8;
+        border-radius: 4px;
+        padding: 6px;
+        cursor: pointer;
+      }
       .sidebar {
         grid-column: 3;
         grid-row: 1 / 4;
@@ -387,6 +439,7 @@
 
       <!-- サイドバー -->
       <aside class="sidebar">
+        <div id="property-panel"></div>
         <h2>🤖 AIチャット</h2>
         <div class="chat-log" id="chat-log"></div>
         <div class="chat-controls">

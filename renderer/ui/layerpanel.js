@@ -1,4 +1,5 @@
 import { getLanguage, onLanguageChange, setLanguage, t } from './i18n.js';
+import { getLineTypeOptions } from '../cad/linetypes.js';
 
 export function initLayerPanel({
   getLayers,
@@ -7,6 +8,8 @@ export function initLayerPanel({
   onCreateLayer,
   onToggleLayerVisible,
   onToggleLayerLocked,
+  onUpdateLayerColor,
+  onUpdateLayerLinetype,
 }) {
   const root = document.getElementById('layer-panel');
   if (!root) return { refresh() {} };
@@ -84,7 +87,7 @@ export function initLayerPanel({
 
     const header = document.createElement('div');
     header.className = 'layer-list-header';
-    header.innerHTML = `<span></span><span>${t('layer_visible')}</span><span>${t('layer_locked')}</span>`;
+    header.innerHTML = `<span></span><span>色</span><span>線種</span><span>${t('layer_visible')}</span><span>${t('layer_locked')}</span>`;
     root.appendChild(header);
 
     const list = document.createElement('div');
@@ -99,6 +102,23 @@ export function initLayerPanel({
       nameBtn.textContent = layer.name;
       nameBtn.addEventListener('click', () => onSelectLayer(layer.id));
 
+      const colorInput = document.createElement('input');
+      colorInput.type = 'color';
+      colorInput.className = 'layer-color-input';
+      colorInput.value = layer.color || '#00bfff';
+      colorInput.addEventListener('change', () => onUpdateLayerColor?.(layer.id, colorInput.value));
+
+      const linetypeSelect = document.createElement('select');
+      linetypeSelect.className = 'layer-linetype-select';
+      for (const lt of getLineTypeOptions()) {
+        const opt = document.createElement('option');
+        opt.value = lt.id;
+        opt.textContent = lt.label;
+        linetypeSelect.appendChild(opt);
+      }
+      linetypeSelect.value = layer.linetype || 'CONTINUOUS';
+      linetypeSelect.addEventListener('change', () => onUpdateLayerLinetype?.(layer.id, linetypeSelect.value));
+
       const visibleBtn = document.createElement('button');
       visibleBtn.className = `layer-toggle ${layer.visible ? 'on' : 'off'}`;
       visibleBtn.textContent = layer.visible ? '👁' : '🚫';
@@ -109,7 +129,7 @@ export function initLayerPanel({
       lockedBtn.textContent = layer.locked ? '🔒' : '🔓';
       lockedBtn.addEventListener('click', () => onToggleLayerLocked(layer.id));
 
-      row.append(nameBtn, visibleBtn, lockedBtn);
+      row.append(nameBtn, colorInput, linetypeSelect, visibleBtn, lockedBtn);
       list.appendChild(row);
     }
 

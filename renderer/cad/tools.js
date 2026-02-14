@@ -1,4 +1,6 @@
 import { mmToScreen, snapToGrid } from './canvas.js';
+import { getDashPattern } from './linetypes.js';
+import { resolveShapeColor } from './colors.js';
 
 export const Tool = {
   SELECT: 'select',
@@ -24,19 +26,17 @@ export const Tool = {
   TEXT: 'text',
 };
 
-// AutoCAD風カラー
-const COLOR_LINE    = '#00bfff';  // 水色（AutoCADデフォルト）
-const COLOR_ARC     = '#00bfff';
-const COLOR_RECT    = '#00bfff';
-const COLOR_PREVIEW = '#ffff00';  // 黄色（作図中プレビュー）
+const COLOR_PREVIEW = '#ffff00';  // 黄色（作図中プレビュー)
 const COLOR_SELECT  = '#ff4444';  // 赤（選択中）
 
 export function buildShapeNode(shape, viewport, options = {}) {
-  const { isPreview = false, isSelected = false } = options;
+  const { isPreview = false, isSelected = false, layerStyle = null } = options;
 
-  // 線幅は常に1px（ズームしても細いままがAutoCAD風）
-  const sw = 1;
-  const color = isPreview ? COLOR_PREVIEW : isSelected ? COLOR_SELECT : COLOR_LINE;
+  const resolvedLinewidth = Number(shape.linewidth ?? layerStyle?.linewidth ?? 0.25);
+  const sw = Math.max(1, resolvedLinewidth * viewport.scale);
+  const color = isPreview ? COLOR_PREVIEW : isSelected ? COLOR_SELECT : resolveShapeColor(shape, layerStyle);
+  const linetype = shape.linetype || layerStyle?.linetype || 'CONTINUOUS';
+  const dash = isPreview ? [8, 4] : getDashPattern(linetype, viewport.scale);
 
   if (shape.type === 'line') {
     const p1 = mmToScreen({ x: shape.x1, y: shape.y1 }, viewport);
@@ -45,7 +45,7 @@ export function buildShapeNode(shape, viewport, options = {}) {
       points: [p1.x, p1.y, p2.x, p2.y],
       stroke: color,
       strokeWidth: sw,
-      dash: isPreview ? [8, 4] : undefined,
+      dash,
       id: shape.id,
       listening: !isPreview,
     });
@@ -63,6 +63,7 @@ export function buildShapeNode(shape, viewport, options = {}) {
       rotation: shape.startAngle,
       stroke: color,
       strokeWidth: sw,
+      dash,
       id: shape.id,
       listening: !isPreview,
     });
@@ -77,7 +78,7 @@ export function buildShapeNode(shape, viewport, options = {}) {
       stroke: color,
       strokeWidth: sw,
       fill: 'transparent',
-      dash: isPreview ? [8, 4] : undefined,
+      dash,
       id: shape.id,
       listening: !isPreview,
     });
@@ -244,7 +245,7 @@ export function buildShapeNode(shape, viewport, options = {}) {
     height: shape.h * viewport.scale,
     stroke: color,
     strokeWidth: sw,
-    dash: isPreview ? [8, 4] : undefined,
+    dash,
     id: shape.id,
     listening: !isPreview,
   });
