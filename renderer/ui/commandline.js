@@ -148,6 +148,8 @@ const HELP_TEXT = `コマンド一覧:
   DIM  → 寸法                 ML   → 引出線
   U    → 元に戻す
   AUDIT→ 監査ログ              CMP  → 直前差分
+  VLIST→ 保存ビュー一覧        VSAVE 名前 → 現在ビュー保存
+  VRESTORE 名前 → 保存ビュー復元
   PLOT → 印刷(PDF)            ZA   → 全体表示
   Esc  → キャンセル
 
@@ -236,6 +238,25 @@ export function initCommandLine({ onToolChange, onCoordInput, onSpecialCommand, 
     const raw = inputEl.value.trim();
     inputEl.value = '';
     if (!raw) return;
+
+    const viewSaveMatch = raw.match(/^vsave\s+(.+)$/i);
+    if (viewSaveMatch) {
+      const name = viewSaveMatch[1].trim();
+      onSpecialCommand?.({ type: 'viewSave', name });
+      return;
+    }
+
+    const viewRestoreMatch = raw.match(/^vrestore\s+(.+)$/i);
+    if (viewRestoreMatch) {
+      const name = viewRestoreMatch[1].trim();
+      onSpecialCommand?.({ type: 'viewRestore', name });
+      return;
+    }
+
+    if (/^vlist$/i.test(raw)) {
+      onSpecialCommand?.({ type: 'viewList' });
+      return;
+    }
 
     // ヘルプ
     if (raw === '?') {
