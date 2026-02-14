@@ -60,6 +60,10 @@ const COMMAND_MAP = {
   'u':    'undo',
   'undo': 'undo',
   'redo': 'redo',
+  'audit': 'audit',
+  'log': 'audit',
+  'cmp': 'compare',
+  'compare': 'compare',
   'z':    'zoom',
   'za':   'zoomAll',
   'p':    'print',
@@ -106,7 +110,7 @@ const TOOL_GUIDES = {
   circle:   { 0: '中心点をクリック または 座標を入力', 1: '円周点をクリック または 半径を入力 (例: 1000)' },
   ellipse:  { 0: '中心点をクリック', 1: 'X軸端点をクリック', 2: 'Y軸端点をクリック' },
   arc:      { 0: '始点をクリック', 1: '中間点をクリック', 2: '終点をクリック' },
-  polyline: { 0: '始点をクリック', 1: '次の点をクリック [Enter:終了] [C:閉じる] [右クリック:終了]' },
+  polyline: { 0: '始点をクリック', 1: '次の点をクリック [Enter:終了] [C:閉じる] [Backspace:1点戻る] [右クリック:終了]' },
   offset:   { 0: 'オフセット距離を入力 [Enter]', 1: '元の線をクリック', 2: 'オフセット方向をクリック [Esc:終了]' },
   text:     { 0: '文字の挿入点をクリック', 1: '文字を入力 [Enter:確定]' },
   move:     { 0: '基点をクリック', 1: '目標点をクリック または @dx,dy を入力' },
@@ -138,6 +142,7 @@ const HELP_TEXT = `コマンド一覧:
   F    → フィレット
   AR   → 配列複写             H    → ハッチ
   DIM  → 寸法                 U    → 元に戻す
+  AUDIT→ 監査ログ              CMP  → 直前差分
   PLOT → 印刷(PDF)            ZA   → 全体表示
   Esc  → キャンセル
 
@@ -250,6 +255,16 @@ export function initCommandLine({ onToolChange, onCoordInput, onSpecialCommand, 
     if (toolId === 'zoomAll' || lower === 'za') {
       addHistory('全体表示', '#8aa8c0');
       onSpecialCommand?.('zoomAll');
+      return;
+    }
+    if (toolId === 'audit') {
+      addHistory('監査ログを表示', '#8aa8c0');
+      onSpecialCommand?.('audit');
+      return;
+    }
+    if (toolId === 'compare') {
+      addHistory('直前差分を表示', '#8aa8c0');
+      onSpecialCommand?.('compare');
       return;
     }
     if (toolId === 'erase') {
