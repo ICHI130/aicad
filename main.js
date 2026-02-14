@@ -89,15 +89,18 @@ ipcMain.handle('cad:print-pdf', async (event, options = {}) => {
   if (!browserWindow) throw new Error('印刷対象のウィンドウが見つかりません。');
 
   const landscape = Boolean(options.landscape);
+  const allowedSizes = new Set(['A4', 'A3', 'Letter']);
+  const paperSize = allowedSizes.has(options.paperSize) ? options.paperSize : 'A4';
   const pdfBuffer = await browserWindow.webContents.printToPDF({
     printBackground: true,
     landscape,
-    preferCSSPageSize: true,
+    pageSize: paperSize,
+    preferCSSPageSize: false,
   });
 
   const { filePath, canceled } = await dialog.showSaveDialog({
     filters: [{ name: 'PDF', extensions: ['pdf'] }],
-    defaultPath: landscape ? 'aicad-landscape.pdf' : 'aicad.pdf',
+    defaultPath: landscape ? `aicad-${paperSize.toLowerCase()}-landscape.pdf` : `aicad-${paperSize.toLowerCase()}.pdf`,
   });
 
   if (canceled || !filePath) return { canceled: true };

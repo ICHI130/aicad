@@ -615,6 +615,30 @@
             </label>
 
 
+            <div class="settings-title">🖨 出図レイアウト / Plot Style</div>
+            <label class="settings-label">用紙サイズ
+              <select id="plot-paper-size">
+                <option value="A4">A4</option>
+                <option value="A3">A3</option>
+                <option value="Letter">Letter</option>
+              </select>
+            </label>
+            <label class="settings-label">印刷方向
+              <select id="plot-orientation">
+                <option value="landscape">横向き</option>
+                <option value="portrait">縦向き</option>
+              </select>
+            </label>
+            <label class="settings-label">Plot Style
+              <select id="plot-style">
+                <option value="monochrome">monochrome.ctb（モノクロ）</option>
+                <option value="screen">ByLayerカラー</option>
+              </select>
+            </label>
+            <label class="settings-label">線幅スケール
+              <input id="plot-lineweight-scale" type="number" min="0.1" step="0.1" value="1.0" />
+            </label>
+
             <div class="settings-title">📐 寸法スタイル</div>
             <label class="settings-label">文字高さ (mm)
               <input id="dim-text-height" type="number" min="0.5" step="0.5" value="2.5" />
