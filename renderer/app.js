@@ -201,6 +201,17 @@ let textState = { point: null, inputEl: null };
 let orthoMode = false;
 let snapMode = true;
 let gridVisible = true;
+let rightClickMode = 'autocad_like';
+let oneShotSnapMode = null;
+let shiftRightSnapMenu = null;
+
+const persistentSnapModes = new Set(['endpoint', 'midpoint', 'intersection', 'quadrant', 'center']);
+
+try {
+  rightClickMode = localStorage.getItem('cad.rightClickMode') || 'autocad_like';
+} catch {
+  rightClickMode = 'autocad_like';
+}
 
 // 矩形選択状態
 let boxSelectStart = null; // スクリーン座標
@@ -601,13 +612,82 @@ function pointerToMm() {
   return screenToMm(pointer, viewport);
 }
 
+function getActiveSnapModes() {
+  if (oneShotSnapMode) return [oneShotSnapMode];
+  return [...persistentSnapModes];
+}
+
+function consumeOneShotSnap() {
+  if (!oneShotSnapMode) return;
+  const consumed = oneShotSnapMode;
+  oneShotSnapMode = null;
+  cmdline.addHistory(`一時OSNAP消費: ${consumed.toUpperCase()}`, '#8aa8c0');
+}
+
+function hideShiftRightSnapMenu() {
+  if (shiftRightSnapMenu) shiftRightSnapMenu.style.display = 'none';
+}
+
+function showShiftRightSnapMenu(clientX, clientY) {
+  if (!shiftRightSnapMenu) {
+    shiftRightSnapMenu = document.createElement('div');
+    shiftRightSnapMenu.style.position = 'fixed';
+    shiftRightSnapMenu.style.zIndex = '9999';
+    shiftRightSnapMenu.style.background = 'rgba(20, 20, 20, 0.95)';
+    shiftRightSnapMenu.style.border = '1px solid #4da6ff';
+    shiftRightSnapMenu.style.borderRadius = '6px';
+    shiftRightSnapMenu.style.padding = '6px';
+    shiftRightSnapMenu.style.minWidth = '180px';
+    shiftRightSnapMenu.style.boxShadow = '0 2px 12px rgba(0,0,0,0.35)';
+    container.appendChild(shiftRightSnapMenu);
+  }
+
+  const defs = [
+    { id: 'endpoint', label: 'Endpoint (端点)' },
+    { id: 'midpoint', label: 'Midpoint (中点)' },
+    { id: 'intersection', label: 'Intersection (交点)' },
+    { id: 'center', label: 'Center (中心)' },
+    { id: 'perpendicular', label: 'Perpendicular (垂線)' },
+    { id: 'tangent', label: 'Tangent (接線)' },
+    { id: 'nearest', label: 'Nearest (最近点)' },
+  ];
+
+  shiftRightSnapMenu.innerHTML = '';
+  for (const def of defs) {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.textContent = def.label;
+    item.style.display = 'block';
+    item.style.width = '100%';
+    item.style.margin = '2px 0';
+    item.style.padding = '4px 6px';
+    item.style.textAlign = 'left';
+    item.style.background = 'transparent';
+    item.style.color = '#d8e8ff';
+    item.style.border = '1px solid #333';
+    item.style.borderRadius = '4px';
+    item.style.cursor = 'pointer';
+    item.addEventListener('click', () => {
+      oneShotSnapMode = def.id;
+      statusbar.setCustomGuide(`一時OSNAP: ${def.label}（次クリックのみ有効）`);
+      cmdline.addHistory(`一時OSNAP: ${def.label}`, '#8aa8c0');
+      hideShiftRightSnapMenu();
+    });
+    shiftRightSnapMenu.appendChild(item);
+  }
+
+  shiftRightSnapMenu.style.left = `${clientX}px`;
+  shiftRightSnapMenu.style.top = `${clientY}px`;
+  shiftRightSnapMenu.style.display = 'block';
+}
+
 function getSnap() {
   const raw = pointerToMm();
   if (!snapMode) {
     latestSnap = { x: raw.x, y: raw.y, type: 'grid' };
     return { x: raw.x, y: raw.y };
   }
-  latestSnap = findSnapPoint(raw, shapes, viewport);
+  latestSnap = findSnapPoint(raw, shapes, viewport, { enabledTypes: getActiveSnapModes() });
   return { x: latestSnap.x, y: latestSnap.y };
 }
 
@@ -1150,6 +1230,17 @@ function redrawSnapMarker() {
   } else if (latestSnap.type === 'intersection') {
     snapLayer.add(new Konva.Line({ points: [p.x - 5, p.y - 5, p.x + 5, p.y + 5], stroke: '#66ccff', strokeWidth: 1 }));
     snapLayer.add(new Konva.Line({ points: [p.x + 5, p.y - 5, p.x - 5, p.y + 5], stroke: '#66ccff', strokeWidth: 1 }));
+  } else if (latestSnap.type === 'center') {
+    snapLayer.add(new Konva.Circle({ x: p.x, y: p.y, radius: 5, stroke: '#bb88ff', strokeWidth: 1 }));
+    snapLayer.add(new Konva.Line({ points: [p.x - 6, p.y, p.x + 6, p.y], stroke: '#bb88ff', strokeWidth: 1 }));
+    snapLayer.add(new Konva.Line({ points: [p.x, p.y - 6, p.x, p.y + 6], stroke: '#bb88ff', strokeWidth: 1 }));
+  } else if (latestSnap.type === 'perpendicular') {
+    snapLayer.add(new Konva.Line({ points: [p.x - 6, p.y + 4, p.x - 6, p.y - 4, p.x + 6, p.y - 4], stroke: '#ff9966', strokeWidth: 1 }));
+  } else if (latestSnap.type === 'tangent') {
+    snapLayer.add(new Konva.Circle({ x: p.x, y: p.y, radius: 4, stroke: '#ff66aa', strokeWidth: 1 }));
+    snapLayer.add(new Konva.Line({ points: [p.x - 6, p.y + 6, p.x + 6, p.y - 6], stroke: '#ff66aa', strokeWidth: 1 }));
+  } else if (latestSnap.type === 'nearest') {
+    snapLayer.add(new Konva.Circle({ x: p.x, y: p.y, radius: 3, fill: '#66ffaa', stroke: '#66ffaa' }));
   }
   snapLayer.draw();
 }
@@ -1579,7 +1670,8 @@ function exportCurrentDxf() {
 // ──────────────────────────────────────────────
 stage.on('mousemove', () => {
   let mm = getSnap();
-  statusbar.updateCursor(mm, latestSnap?.type || 'grid', snapMode);
+  const activeModesText = oneShotSnapMode ? `TEMP:${oneShotSnapMode.toUpperCase()}` : [...persistentSnapModes].map((m) => m.slice(0, 3).toUpperCase()).join(',');
+  statusbar.updateCursor(mm, latestSnap?.type || 'grid', snapMode, activeModesText);
   const pointer = stage.getPointerPosition();
 
   if (isPanning && panStart) {
@@ -1712,6 +1804,7 @@ stage.on('mousedown', (event) => {
   const orthoRef = drawingStart || (polylinePoints.length ? polylinePoints[polylinePoints.length - 1] : null)
     || moveState?.base || copyState?.base || scaleState?.base || arrayState?.base;
   if (orthoMode && orthoRef) mm = applyOrtho(orthoRef, mm);
+  consumeOneShotSnap();
 
   // ──── 各ツール処理 ────
 
@@ -2374,10 +2467,44 @@ stage.on('mouseup', (event) => {
 stage.on('contextmenu', (event) => {
   event.evt.preventDefault();
 
-  // 作図中は右クリックでキャンセル/確定
+  if (event.evt.shiftKey) {
+    showShiftRightSnapMenu(event.evt.clientX, event.evt.clientY);
+    return;
+  }
+  hideShiftRightSnapMenu();
+
+  // AutoCAD互換: コマンド中は右クリックをEnter相当として扱う
+  const commandRunning = tool !== Tool.SELECT;
+  if (rightClickMode === 'autocad_like' && commandRunning) {
+    if (tool === Tool.POLYLINE) { finishPolyline(false); return; }
+    if (tool === Tool.LINE || tool === Tool.ARC || tool === Tool.ELLIPSE) {
+      drawingStart = null;
+      arcState = { p1: null, p2: null };
+      ellipseState = { center: null, rx: null };
+      previewShape = null;
+      cmdline.addHistory('右クリック: Enter相当でコマンド終了', '#8aa8c0');
+      changeTool(Tool.SELECT);
+      return;
+    }
+    if (tool === Tool.TRIM && trimState.phase === 0) {
+      trimState.phase = 1;
+      cmdline.addHistory('切断する部分をクリック [Esc:終了]', '#8aa8c0');
+      statusbar.setGuide(tool, 1);
+      cmdline.setPrompt(tool, 1);
+      return;
+    }
+    if (tool === Tool.EXTEND && extendState.phase === 0) {
+      extendState.phase = 1;
+      cmdline.addHistory('延長する線をクリック [Esc:終了]', '#8aa8c0');
+      statusbar.setGuide(tool, 1);
+      cmdline.setPrompt(tool, 1);
+      return;
+    }
+  }
+
+  // 互換モード: 旧来の右クリックキャンセル
   if (tool === Tool.POLYLINE) { finishPolyline(false); return; }
   if (tool === Tool.LINE || tool === Tool.ARC || tool === Tool.ELLIPSE) {
-    // 線/円弧作図中: 右クリックで終了（AutoCAD準拠）
     drawingStart = null; arcState = { p1: null, p2: null }; previewShape = null;
     changeTool(Tool.SELECT); return;
   }
@@ -2397,6 +2524,10 @@ stage.on('contextmenu', (event) => {
 
   // 選択ツール: コンテキストメニューを表示
   showContextMenu(event.evt.clientX, event.evt.clientY);
+});
+
+document.addEventListener('mousedown', () => {
+  hideShiftRightSnapMenu();
 });
 
 // ──────────────────────────────────────────────
@@ -2523,7 +2654,7 @@ document.addEventListener('keydown', (event) => {
   }
 
   // Escape
-  if (key === 'Escape') { escapeCurrentTool(); return; }
+  if (key === 'Escape') { oneShotSnapMode = null; hideShiftRightSnapMenu(); escapeCurrentTool(); return; }
 
   // Delete
   if (key === 'Delete' && (selectedId || selectedIds.size > 0)) {
@@ -2587,6 +2718,13 @@ document.addEventListener('keydown', (event) => {
     event.preventDefault();
     const enabled = dynInput.toggle();
     cmdline.addHistory(`動的入力: ${enabled ? 'ON' : 'OFF'}`, '#8aa8c0');
+    return;
+  }
+  // F10: 右クリックモード切替
+  if (key === 'F10') {
+    rightClickMode = rightClickMode === 'autocad_like' ? 'legacy_cancel' : 'autocad_like';
+    try { localStorage.setItem('cad.rightClickMode', rightClickMode); } catch {}
+    cmdline.addHistory(`右クリックモード: ${rightClickMode}`, '#8aa8c0');
     return;
   }
 
@@ -2950,5 +3088,3 @@ function pointToLineParam(line, point) {
 function pointOnLineByT(line, t) {
   return { x: line.x1 + (line.x2 - line.x1) * t, y: line.y1 + (line.y2 - line.y1) * t };
 }
-
-
