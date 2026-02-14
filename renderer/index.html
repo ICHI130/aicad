@@ -603,6 +603,29 @@
             <label class="settings-label">Ollama ホスト
               <input id="ollama-host" type="text" placeholder="http://localhost:11434" autocomplete="off" />
             </label>
+
+
+            <div class="settings-title">📐 寸法スタイル</div>
+            <label class="settings-label">文字高さ (mm)
+              <input id="dim-text-height" type="number" min="0.5" step="0.5" value="2.5" />
+            </label>
+            <label class="settings-label">矢印サイズ (mm)
+              <input id="dim-arrow-size" type="number" min="0.5" step="0.5" value="2.5" />
+            </label>
+            <label class="settings-label">単位
+              <select id="dim-unit">
+                <option value="mm">mm</option>
+                <option value="cm">cm</option>
+                <option value="m">m</option>
+              </select>
+            </label>
+            <label class="settings-label">小数点以下
+              <select id="dim-precision">
+                <option value="0">0桁（1234）</option>
+                <option value="1">1桁（1234.5）</option>
+                <option value="2">2桁（1234.56）</option>
+              </select>
+            </label>
           </div>
         </div>
       </aside>

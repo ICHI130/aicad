@@ -1,6 +1,6 @@
 import { Tool } from './tools.js';
 
-export function buildPreviewShape({ tool, drawingStart, point, polylinePoints, dimState, arcState, arrayState, normalizeRect, arcFromThreePoints, cloneWithOffset }) {
+export function buildPreviewShape({ tool, drawingStart, point, polylinePoints, dimState, arcState, ellipseState, arrayState, normalizeRect, arcFromThreePoints, cloneWithOffset }) {
   if (tool === Tool.LINE && drawingStart) {
     return { type: 'line', x1: drawingStart.x, y1: drawingStart.y, x2: point.x, y2: point.y };
   }
@@ -12,6 +12,13 @@ export function buildPreviewShape({ tool, drawingStart, point, polylinePoints, d
 
   if (tool === Tool.CIRCLE && drawingStart) {
     return { type: 'circle', cx: drawingStart.x, cy: drawingStart.y, r: Math.hypot(point.x - drawingStart.x, point.y - drawingStart.y) };
+  }
+
+
+  if (tool === Tool.ELLIPSE && ellipseState?.center) {
+    const rx = ellipseState.rx ?? Math.abs(point.x - ellipseState.center.x);
+    const ry = Math.abs(point.y - ellipseState.center.y);
+    if (rx > 0 && ry > 0) return { type: 'ellipse', cx: ellipseState.center.x, cy: ellipseState.center.y, rx, ry, rotation: 0 };
   }
 
 
@@ -27,10 +34,15 @@ export function buildPreviewShape({ tool, drawingStart, point, polylinePoints, d
     return { type: 'polyline_preview', points: [...polylinePoints, point] };
   }
 
-  if (tool === Tool.DIM && dimState.p1 && dimState.p2) {
-    const dir = Math.abs(dimState.p2.x - dimState.p1.x) > Math.abs(dimState.p2.y - dimState.p1.y) ? 'h' : 'v';
-    const offset = dir === 'h' ? point.y - dimState.p1.y : point.x - dimState.p1.x;
-    return { type: 'dim', x1: dimState.p1.x, y1: dimState.p1.y, x2: dimState.p2.x, y2: dimState.p2.y, offset, dir };
+  if (tool === Tool.DIM) {
+    if (dimState.mode === 'radius' && dimState.circle) {
+      return { type: 'dim', dimType: 'radius', cx: dimState.circle.cx, cy: dimState.circle.cy, r: dimState.circle.r, px: point.x, py: point.y };
+    }
+    if (dimState.p1 && dimState.p2) {
+      const dir = Math.abs(dimState.p2.x - dimState.p1.x) > Math.abs(dimState.p2.y - dimState.p1.y) ? 'h' : 'v';
+      const offset = dir === 'h' ? point.y - dimState.p1.y : point.x - dimState.p1.x;
+      return { type: 'dim', x1: dimState.p1.x, y1: dimState.p1.y, x2: dimState.p2.x, y2: dimState.p2.y, offset, dir };
+    }
   }
 
   return null;

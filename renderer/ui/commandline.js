@@ -11,6 +11,8 @@ const COMMAND_MAP = {
   'rectangle': 'rect',
   'c':    'circle',
   'circle': 'circle',
+  'el':   'ellipse',
+  'ellipse': 'ellipse',
   'a':    'arc',
   'arc':  'arc',
   'pl':   'polyline',
@@ -34,6 +36,12 @@ const COMMAND_MAP = {
   'x':    'explode',
   'explode': 'explode',
   'tr':   'trim',
+  'br':   'break',
+  'break': 'break',
+  'len':  'lengthen',
+  'lengthen': 'lengthen',
+  'cha':  'chamfer',
+  'chamfer': 'chamfer',
   'trim': 'trim',
   'ex':   'extend',
   'extend': 'extend',
@@ -67,6 +75,7 @@ const TOOL_LABELS = {
   line:     '線',
   rect:     '矩形',
   circle:   '円',
+  ellipse:  '楕円',
   arc:      '円弧',
   polyline: 'ポリライン',
   offset:   'オフセット',
@@ -78,6 +87,9 @@ const TOOL_LABELS = {
   join:     '結合',
   explode:  '分解',
   trim:     'トリム',
+  break:    'ブレーク',
+  lengthen: '長さ変更',
+  chamfer:  '面取り',
   extend:   '延長',
   fillet:   'フィレット',
   array:    '配列複写',
@@ -92,6 +104,7 @@ const TOOL_GUIDES = {
   line:     { 0: '始点をクリック または 座標を入力 (例: 0,0)', 1: '終点をクリック または 長さを入力 [Enter確定] [C:閉じる] [Esc:終了]' },
   rect:     { 0: '第1コーナーをクリック または 座標を入力', 1: '対角コーナーをクリック または @幅,高さ を入力 (例: @5700,3600)' },
   circle:   { 0: '中心点をクリック または 座標を入力', 1: '円周点をクリック または 半径を入力 (例: 1000)' },
+  ellipse:  { 0: '中心点をクリック', 1: 'X軸端点をクリック', 2: 'Y軸端点をクリック' },
   arc:      { 0: '始点をクリック', 1: '中間点をクリック', 2: '終点をクリック' },
   polyline: { 0: '始点をクリック', 1: '次の点をクリック [Enter:終了] [C:閉じる] [右クリック:終了]' },
   offset:   { 0: 'オフセット距離を入力 [Enter]', 1: '元の線をクリック', 2: 'オフセット方向をクリック [Esc:終了]' },
@@ -103,6 +116,9 @@ const TOOL_GUIDES = {
   join:     { 0: '接続したい2本の線を選択して実行' },
   explode:  { 0: '分解したい図形を選択して実行' },
   trim:     { 0: '切断境界の線をクリック [Enter:全て境界]', 1: '切断する部分をクリック [Esc:終了]' },
+  break:    { 0: '切断する線をクリック', 1: '切断点1をクリック', 2: '切断点2をクリック' },
+  lengthen: { 0: '長さ変更量を入力 (例: 100, -100)', 1: '変更する線の端側をクリック' },
+  chamfer:  { 0: '面取り距離を入力 (例: 100 または 100,50)', 1: '1本目の線をクリック', 2: '2本目の線をクリック' },
   fillet:   { 0: 'フィレット半径を入力 [Enter] (0=直角コーナー)', 1: '1本目の線をクリック', 2: '2本目の線をクリック' },
   array:    { 0: '基点をクリック', 1: '配列方向点をクリック [数値入力で個数変更]' },
   hatch:    { 0: '境界(矩形/円)をクリックしてハッチ作成' },
@@ -111,11 +127,15 @@ const TOOL_GUIDES = {
 
 const HELP_TEXT = `コマンド一覧:
   L    → 線 (LINE)          C    → 円 (CIRCLE)
-  REC  → 矩形 (RECTANGLE)   PL   → ポリライン
+  REC  → 矩形 (RECTANGLE)   EL   → 楕円 (ELLIPSE)
+  PL   → ポリライン
   O    → オフセット          T    → 文字
   M    → 移動 (MOVE)         CO   → コピー
   RO   → 回転 (ROTATE)       MI   → 鏡像 (MIRROR)
-  TR   → トリム               F    → フィレット
+  BR   → ブレーク             LEN  → 長さ変更
+  CHA  → 面取り
+  TR   → トリム
+  F    → フィレット
   AR   → 配列複写             H    → ハッチ
   DIM  → 寸法                 U    → 元に戻す
   PLOT → 印刷(PDF)            ZA   → 全体表示
