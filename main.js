@@ -55,8 +55,20 @@ ipcMain.handle('cad:open-file', async () => {
   }
 
   const filePath = result.filePaths[0];
-  const content = await fs.readFile(filePath, 'utf8');
-  return { canceled: false, filePath, content };
+  const ext = filePath.split('.').pop()?.toLowerCase();
+
+  // JWW/JWCはバイナリ、DXFはテキスト
+  if (ext === 'jww' || ext === 'jwc') {
+    const buffer = await fs.readFile(filePath);
+    // Base64に変換してrendererに渡す
+    const base64 = buffer.toString('base64');
+    return { canceled: false, filePath, content: null, base64, isBinary: true };
+  }
+
+  // DXFはバイナリで読んでBase64に変換（CP932/UTF-8判定はrenderer側で行う）
+  const buffer = await fs.readFile(filePath);
+  const base64 = buffer.toString('base64');
+  return { canceled: false, filePath, content: null, base64, isBinary: false, isDxf: true };
 });
 
 ipcMain.handle('ai:set-claude-api-key', (_event, apiKey) => {

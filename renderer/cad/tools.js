@@ -6,19 +6,30 @@ export const Tool = {
   RECT: 'rect',
 };
 
+// AutoCAD風カラー
+const COLOR_LINE    = '#00bfff';  // 水色（AutoCADデフォルト）
+const COLOR_ARC     = '#00bfff';
+const COLOR_RECT    = '#00bfff';
+const COLOR_PREVIEW = '#ffff00';  // 黄色（作図中プレビュー）
+const COLOR_SELECT  = '#ff4444';  // 赤（選択中）
+
 export function buildShapeNode(shape, viewport, options = {}) {
-  const { isPreview = false } = options;
+  const { isPreview = false, isSelected = false } = options;
+
+  // 線幅は常に1px（ズームしても細いままがAutoCAD風）
+  const sw = 1;
+  const color = isPreview ? COLOR_PREVIEW : isSelected ? COLOR_SELECT : COLOR_LINE;
 
   if (shape.type === 'line') {
     const p1 = mmToScreen({ x: shape.x1, y: shape.y1 }, viewport);
     const p2 = mmToScreen({ x: shape.x2, y: shape.y2 }, viewport);
     return new Konva.Line({
       points: [p1.x, p1.y, p2.x, p2.y],
-      stroke: isPreview ? '#5ab0ff' : '#9ed0ff',
-      opacity: isPreview ? 0.9 : 1,
-      strokeWidth: 2,
-      dash: isPreview ? [6, 4] : undefined,
+      stroke: color,
+      strokeWidth: sw,
+      dash: isPreview ? [8, 4] : undefined,
       id: shape.id,
+      listening: !isPreview,
     });
   }
 
@@ -32,23 +43,62 @@ export function buildShapeNode(shape, viewport, options = {}) {
       outerRadius: shape.r * viewport.scale,
       angle,
       rotation: shape.startAngle,
-      stroke: '#7be8cc',
-      strokeWidth: 2,
+      stroke: color,
+      strokeWidth: sw,
       id: shape.id,
+      listening: !isPreview,
     });
   }
 
+  if (shape.type === 'text') {
+    const p = mmToScreen({ x: shape.x, y: shape.y }, viewport);
+    const fontSize = Math.max(6, shape.height * viewport.scale);
+    // アライメント: 0=左, 1=中央, 2=右
+    const alignMap = ['left', 'center', 'right'];
+    const node = new Konva.Text({
+      x: p.x,
+      y: p.y,
+      text: shape.text,
+      fontSize,
+      fontFamily: 'MS Gothic, IPAGothic, monospace',
+      fill: color,
+      // DXFは反時計回り正、Konvaは時計回り正 → 符号を反転
+      // ただしY軸自体が反転しているため符号そのままでOK
+      rotation: shape.rotation || 0,
+      align: alignMap[shape.align || 0] || 'left',
+      id: shape.id,
+      listening: !isPreview,
+    });
+    // DXFのテキスト基点はベースライン左端（Y上向き）
+    // スクリーンはY下向きなので、テキストをfontSize分上にオフセット
+    node.offsetY(fontSize);
+    return node;
+  }
+
+  if (shape.type === 'point') {
+    const p = mmToScreen({ x: shape.x, y: shape.y }, viewport);
+    const size = 3;
+    return new Konva.Line({
+      points: [p.x - size, p.y, p.x + size, p.y],
+      stroke: color,
+      strokeWidth: sw,
+      id: shape.id,
+      listening: !isPreview,
+    });
+  }
+
+  // rect
   const p = mmToScreen({ x: shape.x, y: shape.y }, viewport);
   return new Konva.Rect({
     x: p.x,
     y: p.y,
     width: shape.w * viewport.scale,
     height: shape.h * viewport.scale,
-    stroke: isPreview ? '#ffde85' : '#ffd16a',
-    opacity: isPreview ? 0.9 : 1,
-    strokeWidth: 2,
-    dash: isPreview ? [6, 4] : undefined,
+    stroke: color,
+    strokeWidth: sw,
+    dash: isPreview ? [8, 4] : undefined,
     id: shape.id,
+    listening: !isPreview,
   });
 }
 
@@ -59,12 +109,10 @@ function normalizeArcAngle(startAngle, endAngle) {
 }
 
 export function normalizeRect(start, end) {
-  const s = snapToGrid(start);
-  const e = snapToGrid(end);
   return {
-    x: Math.min(s.x, e.x),
-    y: Math.min(s.y, e.y),
-    w: Math.abs(e.x - s.x),
-    h: Math.abs(e.y - s.y),
+    x: Math.min(start.x, end.x),
+    y: Math.min(start.y, end.y),
+    w: Math.abs(end.x - start.x),
+    h: Math.abs(end.y - start.y),
   };
 }

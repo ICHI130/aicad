@@ -1,10 +1,38 @@
 import { createKonvaCanvas, drawGrid, screenToMm, snapToGrid } from './cad/canvas.js';
 import { Tool, buildShapeNode, normalizeRect } from './cad/tools.js';
 import { parseDxf, dxfEntitiesToShapes } from './io/dxf.js';
-import { parseJww, jwwEntitiesToShapes } from './io/jww.js';
+import { parseJww, parseJwwBinary, jwwEntitiesToShapes } from './io/jww.js';
 import { initToolbar } from './ui/toolbar.js';
 import { initStatusbar } from './ui/statusbar.js';
 import { initSidebar } from './ui/sidebar.js';
+
+// Base64 → DXFテキスト（CP932/UTF-8自動判定）
+function decodeDxfBase64(base64) {
+  // Base64 → Uint8Array
+  const binaryStr = atob(base64);
+  const bytes = new Uint8Array(binaryStr.length);
+  for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+
+  // UTF-8 BOMチェック
+  if (bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) {
+    return new TextDecoder('utf-8').decode(bytes);
+  }
+
+  // UTF-8として正常デコードできるか確認（日本語が含まれる場合は失敗しやすい）
+  try {
+    const decoded = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    // UTF-8デコード成功 → UTF-8ファイル
+    return decoded;
+  } catch {
+    // UTF-8デコード失敗 → CP932（Shift-JIS）として読む
+    try {
+      return new TextDecoder('shift_jis').decode(bytes);
+    } catch {
+      // shift_jisが使えない環境のフォールバック（latin1）
+      return new TextDecoder('iso-8859-1').decode(bytes);
+    }
+  }
+}
 
 const container = document.getElementById('cad-root');
 const { stage, gridLayer, drawingLayer } = createKonvaCanvas(container);
@@ -18,6 +46,45 @@ let selectedId = null;
 let isPanning = false;
 let panStart = null;
 let dragState = null;
+
+// Undo/Redo 履歴管理
+const history = [];       // 各要素はshapesのスナップショット
+let historyIndex = -1;
+const MAX_HISTORY = 50;
+
+function saveHistory() {
+  // 現在位置より未来の履歴を削除
+  history.splice(historyIndex + 1);
+  history.push(JSON.parse(JSON.stringify(shapes)));
+  if (history.length > MAX_HISTORY) history.shift();
+  historyIndex = history.length - 1;
+}
+
+function undo() {
+  if (historyIndex <= 0) return;
+  historyIndex -= 1;
+  shapes.length = 0;
+  for (const s of history[historyIndex]) shapes.push(s);
+  selectedId = null;
+  dragState = null;
+  redraw();
+}
+
+function redo() {
+  if (historyIndex >= history.length - 1) return;
+  historyIndex += 1;
+  shapes.length = 0;
+  for (const s of history[historyIndex]) shapes.push(s);
+  selectedId = null;
+  dragState = null;
+  redraw();
+}
+
+// 初期状態を履歴に保存
+saveHistory();
+
+// 中ボタンダブルクリック検出用
+let lastMiddleClickTime = 0;
 
 const toolbar = initToolbar({
   onChangeTool(nextTool) {
@@ -36,6 +103,7 @@ const statusbar = initStatusbar({
     const id = `shape_${crypto.randomUUID()}`;
     shapes.push({ id, type: 'rect', x: 0, y: 0, w, h });
     selectedId = id;
+    saveHistory();
     redraw();
   },
 });
@@ -54,6 +122,12 @@ initSidebar({
       }
       if (s.type === 'arc') {
         return { type: 'arc', cx: s.cx, cy: s.cy, r: s.r, startAngle: s.startAngle, endAngle: s.endAngle, layer: 'default' };
+      }
+      if (s.type === 'text') {
+        return { type: 'text', x: s.x, y: s.y, text: s.text, height: s.height, rotation: s.rotation, layer: 'default' };
+      }
+      if (s.type === 'point') {
+        return { type: 'point', x: s.x, y: s.y, layer: 'default' };
       }
       return { type: 'rect', x: s.x, y: s.y, w: s.w, h: s.h, layer: 'default' };
     });
@@ -79,6 +153,9 @@ function computeBoundingBox(elements) {
     } else if (e.type === 'arc') {
       xs.push(e.cx - e.r, e.cx + e.r);
       ys.push(e.cy - e.r, e.cy + e.r);
+    } else if (e.type === 'text' || e.type === 'point') {
+      xs.push(e.x);
+      ys.push(e.y);
     } else {
       xs.push(e.x, e.x + e.w);
       ys.push(e.y, e.y + e.h);
@@ -120,6 +197,19 @@ function pickShape(mmPoint) {
         return s;
       }
     }
+
+    if (s.type === 'text') {
+      // テキストは挿入点から右方向・上方向に当たり判定（簡易）
+      const approxW = s.text.length * s.height * 0.7;
+      if (mmPoint.x >= s.x - threshold && mmPoint.x <= s.x + approxW + threshold &&
+          mmPoint.y >= s.y - s.height - threshold && mmPoint.y <= s.y + threshold) {
+        return s;
+      }
+    }
+
+    if (s.type === 'point') {
+      if (Math.hypot(mmPoint.x - s.x, mmPoint.y - s.y) <= threshold * 2) return s;
+    }
   }
   return null;
 }
@@ -139,11 +229,8 @@ function redraw() {
   drawingLayer.destroyChildren();
 
   for (const shape of shapes) {
-    const node = buildShapeNode(shape, viewport);
-    if (shape.id === selectedId) {
-      node.stroke('#ff7a7a');
-      node.strokeWidth(3);
-    }
+    const isSelected = shape.id === selectedId;
+    const node = buildShapeNode(shape, viewport, { isSelected });
     drawingLayer.add(node);
   }
 
@@ -176,6 +263,38 @@ function applyMove(shape, dx, dy) {
     shape.cy += dy;
   }
 }
+
+// 図形全体が画面に収まるようにビューポートを調整（AutoCAD: Zoom Extents = Z→A）
+function fitView(targetShapes) {
+  const all = targetShapes || shapes;
+  if (all.length === 0) return;
+
+  const xs = [], ys = [];
+  for (const s of all) {
+    if (s.type === 'line') { xs.push(s.x1, s.x2); ys.push(s.y1, s.y2); }
+    else if (s.type === 'arc') { xs.push(s.cx - s.r, s.cx + s.r); ys.push(s.cy - s.r, s.cy + s.r); }
+    else if (s.type === 'rect') { xs.push(s.x, s.x + s.w); ys.push(s.y, s.y + s.h); }
+    else if (s.type === 'text' || s.type === 'point') { xs.push(s.x); ys.push(s.y); }
+  }
+  if (xs.length === 0) return;
+
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const w = maxX - minX || 1;
+  const h = maxY - minY || 1;
+
+  const margin = 0.9;
+  const scaleX = (stage.width() * margin) / w;
+  const scaleY = (stage.height() * margin) / h;
+  viewport.scale = Math.min(scaleX, scaleY);  // 制限なし・図面全体が必ず入る
+
+  viewport.x = minX - (stage.width() / viewport.scale - w) / 2;
+  viewport.y = minY - (stage.height() / viewport.scale - h) / 2;
+  redraw();
+}
+
+// キーボード: Z→A 入力シーケンス検出用
+let lastKey = '';
 
 stage.on('mousemove', () => {
   const mm = snapToGrid(pointerToMm());
@@ -219,9 +338,18 @@ stage.on('mousemove', () => {
 });
 
 stage.on('mousedown', (event) => {
+  // 中ボタン: パン開始 & ダブルクリック検出
   if (event.evt.button === 1) {
-    isPanning = true;
-    panStart = stage.getPointerPosition();
+    const now = Date.now();
+    if (now - lastMiddleClickTime < 400) {
+      // 中ボタンダブルクリック → 全体表示（AutoCAD: 中ボタンダブルクリック = Zoom Extents）
+      fitView();
+      lastMiddleClickTime = 0;
+    } else {
+      lastMiddleClickTime = now;
+      isPanning = true;
+      panStart = stage.getPointerPosition();
+    }
     return;
   }
 
@@ -246,6 +374,7 @@ stage.on('mousedown', (event) => {
     selectedId = id;
     drawingStart = null;
     previewShape = null;
+    saveHistory();
     redraw();
     return;
   }
@@ -269,6 +398,7 @@ stage.on('mouseup', (event) => {
       const id = `shape_${crypto.randomUUID()}`;
       shapes.push({ id, type: 'rect', ...rect });
       selectedId = id;
+      saveHistory();
     }
     drawingStart = null;
     previewShape = null;
@@ -277,6 +407,8 @@ stage.on('mouseup', (event) => {
   }
 
   if (dragState) {
+    // ドラッグ移動後に履歴保存
+    saveHistory();
     dragState = null;
   }
 });
@@ -288,8 +420,8 @@ stage.on('wheel', (event) => {
 
   const before = screenToMm(pointer, viewport);
   const direction = event.evt.deltaY > 0 ? -1 : 1;
-  const factor = direction > 0 ? 1.1 : 0.9;
-  viewport.scale = Math.max(0.1, Math.min(10, viewport.scale * factor));
+  const factor = direction > 0 ? 1.25 : 1 / 1.25;
+  viewport.scale = Math.max(0.001, Math.min(200, viewport.scale * factor));
   viewport.x = before.x - pointer.x / viewport.scale;
   viewport.y = before.y - pointer.y / viewport.scale;
 
@@ -297,14 +429,69 @@ stage.on('wheel', (event) => {
 });
 
 document.addEventListener('keydown', (event) => {
+  const key = event.key.toLowerCase();
+
+  // Ctrl+Z: Undo
+  if ((event.ctrlKey || event.metaKey) && key === 'z' && !event.shiftKey) {
+    event.preventDefault();
+    undo();
+    return;
+  }
+
+  // Ctrl+Y or Ctrl+Shift+Z: Redo
+  if ((event.ctrlKey || event.metaKey) && (key === 'y' || (key === 'z' && event.shiftKey))) {
+    event.preventDefault();
+    redo();
+    return;
+  }
+
+  // ESC: 描画キャンセル & 選択解除（AutoCAD準拠）
+  if (event.key === 'Escape') {
+    if (drawingStart || previewShape) {
+      drawingStart = null;
+      previewShape = null;
+      redraw();
+    } else {
+      selectedId = null;
+      tool = Tool.SELECT;
+      toolbar.setActive(tool);
+      redraw();
+    }
+    return;
+  }
+
+  // Delete: 選択図形を削除
   if (event.key === 'Delete' && selectedId) {
     const index = shapes.findIndex((s) => s.id === selectedId);
     if (index !== -1) {
       shapes.splice(index, 1);
       selectedId = null;
+      saveHistory();
       redraw();
     }
+    return;
   }
+
+  // Z→A: Zoom Extents (AutoCAD: Z Enter A Enter)
+  if (key === 'z') {
+    lastKey = 'z';
+    return;
+  }
+  if (key === 'a' && lastKey === 'z') {
+    event.preventDefault();
+    fitView();
+    lastKey = '';
+    return;
+  }
+
+  // F キー: fitView (簡易ショートカット)
+  if (key === 'f') {
+    fitView();
+    lastKey = '';
+    return;
+  }
+
+  lastKey = '';
 });
 
 window.addEventListener('resize', () => {
@@ -328,9 +515,15 @@ async function openCadFile() {
     let imported = [];
 
     if (ext === 'dxf') {
-      imported = dxfEntitiesToShapes(parseDxf(result.content));
+      // Base64 → バイト列 → CP932/UTF-8自動判定してデコード
+      const dxfText = decodeDxfBase64(result.base64);
+      imported = dxfEntitiesToShapes(parseDxf(dxfText));
     } else if (ext === 'jww' || ext === 'jwc') {
-      imported = jwwEntitiesToShapes(parseJww(result.content));
+      if (result.isBinary && result.base64) {
+        imported = jwwEntitiesToShapes(parseJwwBinary(result.base64));
+      } else {
+        imported = jwwEntitiesToShapes(parseJww(result.content));
+      }
     }
 
     if (imported.length === 0) {
@@ -341,6 +534,10 @@ async function openCadFile() {
       shapes.push({ id: `shape_${crypto.randomUUID()}`, ...shape });
     }
     selectedId = null;
+    saveHistory();
+
+    // 読み込み後に図面全体が画面に収まるよう表示
+    fitView();
     redraw();
   } catch (error) {
     console.error('ファイル読み込みエラー', error);
