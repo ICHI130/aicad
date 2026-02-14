@@ -1,27 +1,56 @@
 import { snapToGrid } from './canvas.js';
 
-export function findSnapPoint(mmPoint, shapes, viewport) {
+const SNAP_PRIORITY = ['endpoint', 'intersection', 'midpoint', 'quadrant', 'center', 'perpendicular', 'tangent', 'nearest'];
+
+export function findSnapPoint(mmPoint, shapes, viewport, options = {}) {
   const threshold = 10 / viewport.scale;
+  const enabled = new Set(options.enabledTypes || SNAP_PRIORITY);
+  const excludeShapeId = options.excludeShapeId || null;
+  const candidates = [];
 
   for (const s of shapes) {
-    for (const ep of getEndpoints(s)) {
-      if (dist(mmPoint, ep) < threshold) return { x: ep.x, y: ep.y, type: 'endpoint' };
+    if (excludeShapeId && s.id === excludeShapeId) continue;
+    collectCandidates(candidates, mmPoint, s, threshold, enabled);
+  }
+
+  if (enabled.has('intersection')) {
+    const intersections = getLineIntersections(shapes, excludeShapeId);
+    for (const ip of intersections) {
+      const d = dist(mmPoint, ip);
+      if (d < threshold) candidates.push({ x: ip.x, y: ip.y, type: 'intersection', dist: d });
     }
   }
 
-  const intersections = getLineIntersections(shapes);
-  for (const ip of intersections) {
-    if (dist(mmPoint, ip) < threshold) return { x: ip.x, y: ip.y, type: 'intersection' };
+  if (candidates.length) {
+    candidates.sort((a, b) => {
+      const pa = SNAP_PRIORITY.indexOf(a.type);
+      const pb = SNAP_PRIORITY.indexOf(b.type);
+      if (pa !== pb) return pa - pb;
+      return a.dist - b.dist;
+    });
+    const best = candidates[0];
+    return { x: best.x, y: best.y, type: best.type };
   }
 
-  for (const s of shapes) {
-    if (s.type !== 'line') continue;
+  const g = snapToGrid(mmPoint);
+  return { x: g.x, y: g.y, type: 'grid' };
+}
+
+function collectCandidates(out, mmPoint, s, threshold, enabled) {
+  if (enabled.has('endpoint')) {
+    for (const ep of getEndpoints(s)) {
+      const d = dist(mmPoint, ep);
+      if (d < threshold) out.push({ ...ep, type: 'endpoint', dist: d });
+    }
+  }
+
+  if (enabled.has('midpoint') && s.type === 'line') {
     const mid = { x: (s.x1 + s.x2) / 2, y: (s.y1 + s.y2) / 2 };
-    if (dist(mmPoint, mid) < threshold) return { x: mid.x, y: mid.y, type: 'midpoint' };
+    const d = dist(mmPoint, mid);
+    if (d < threshold) out.push({ ...mid, type: 'midpoint', dist: d });
   }
 
-  for (const s of shapes) {
-    if (s.type !== 'circle' && s.type !== 'arc') continue;
+  if (enabled.has('quadrant') && (s.type === 'circle' || s.type === 'arc')) {
     const qpts = [
       { x: s.cx + s.r, y: s.cy },
       { x: s.cx - s.r, y: s.cy },
@@ -29,12 +58,42 @@ export function findSnapPoint(mmPoint, shapes, viewport) {
       { x: s.cx, y: s.cy - s.r },
     ];
     for (const q of qpts) {
-      if (dist(mmPoint, q) < threshold) return { x: q.x, y: q.y, type: 'quadrant' };
+      if (s.type === 'arc' && !isPointOnArc(q, s)) continue;
+      const d = dist(mmPoint, q);
+      if (d < threshold) out.push({ ...q, type: 'quadrant', dist: d });
     }
   }
 
-  const g = snapToGrid(mmPoint);
-  return { x: g.x, y: g.y, type: 'grid' };
+  if (enabled.has('center') && (s.type === 'circle' || s.type === 'arc' || s.type === 'ellipse')) {
+    const center = { x: s.cx, y: s.cy };
+    const d = dist(mmPoint, center);
+    if (d < threshold) out.push({ ...center, type: 'center', dist: d });
+  }
+
+  if (enabled.has('nearest')) {
+    const nearest = getNearestPointOnShape(mmPoint, s);
+    if (nearest) {
+      const d = dist(mmPoint, nearest);
+      if (d < threshold) out.push({ ...nearest, type: 'nearest', dist: d });
+    }
+  }
+
+  if (enabled.has('perpendicular') && s.type === 'line') {
+    const perp = perpendicularFoot(mmPoint, s);
+    if (perp) {
+      const d = dist(mmPoint, perp);
+      if (d < threshold) out.push({ ...perp, type: 'perpendicular', dist: d });
+    }
+  }
+
+  if (enabled.has('tangent') && (s.type === 'circle' || s.type === 'arc')) {
+    const tangents = tangentPointsFromExternalPoint(mmPoint, s);
+    for (const t of tangents) {
+      if (s.type === 'arc' && !isPointOnArc(t, s)) continue;
+      const d = dist(mmPoint, t);
+      if (d < threshold) out.push({ ...t, type: 'tangent', dist: d });
+    }
+  }
 }
 
 function getEndpoints(s) {
@@ -50,8 +109,82 @@ function getEndpoints(s) {
   return [];
 }
 
-function getLineIntersections(shapes) {
-  const lines = shapes.filter((s) => s.type === 'line');
+function getNearestPointOnShape(p, s) {
+  if (s.type === 'line') return perpendicularFoot(p, s);
+  if (s.type === 'circle') {
+    const vx = p.x - s.cx;
+    const vy = p.y - s.cy;
+    const len = Math.hypot(vx, vy) || 1;
+    return { x: s.cx + (vx / len) * s.r, y: s.cy + (vy / len) * s.r };
+  }
+  if (s.type === 'arc') {
+    const candidate = getNearestPointOnShape(p, { type: 'circle', cx: s.cx, cy: s.cy, r: s.r });
+    if (candidate && isPointOnArc(candidate, s)) return candidate;
+    const ends = arcEndpoints(s);
+    return dist(p, ends[0]) <= dist(p, ends[1]) ? ends[0] : ends[1];
+  }
+  return null;
+}
+
+function perpendicularFoot(p, line) {
+  const ax = line.x1;
+  const ay = line.y1;
+  const bx = line.x2;
+  const by = line.y2;
+  const dx = bx - ax;
+  const dy = by - ay;
+  const den = dx * dx + dy * dy;
+  if (den < 1e-10) return null;
+  const t = ((p.x - ax) * dx + (p.y - ay) * dy) / den;
+  const clamped = Math.max(0, Math.min(1, t));
+  return { x: ax + dx * clamped, y: ay + dy * clamped };
+}
+
+function tangentPointsFromExternalPoint(p, c) {
+  const dx = p.x - c.cx;
+  const dy = p.y - c.cy;
+  const d2 = dx * dx + dy * dy;
+  const r2 = c.r * c.r;
+  if (d2 <= r2 + 1e-9) return [];
+  const root = Math.sqrt(d2 - r2);
+  const t1 = {
+    x: c.cx + (r2 * dx - c.r * dy * root) / d2,
+    y: c.cy + (r2 * dy + c.r * dx * root) / d2,
+  };
+  const t2 = {
+    x: c.cx + (r2 * dx + c.r * dy * root) / d2,
+    y: c.cy + (r2 * dy - c.r * dx * root) / d2,
+  };
+  return [t1, t2];
+}
+
+function arcEndpoints(arc) {
+  const s = polar(arc.cx, arc.cy, arc.r, arc.startAngle);
+  const e = polar(arc.cx, arc.cy, arc.r, arc.endAngle);
+  return [s, e];
+}
+
+function polar(cx, cy, r, deg) {
+  const rad = (deg * Math.PI) / 180;
+  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+}
+
+function isPointOnArc(point, arc) {
+  const a = normalizeDeg(Math.atan2(point.y - arc.cy, point.x - arc.cx) * 180 / Math.PI);
+  const start = normalizeDeg(arc.startAngle);
+  const end = normalizeDeg(arc.endAngle);
+  if (start <= end) return a >= start - 1e-6 && a <= end + 1e-6;
+  return a >= start - 1e-6 || a <= end + 1e-6;
+}
+
+function normalizeDeg(deg) {
+  let d = deg % 360;
+  if (d < 0) d += 360;
+  return d;
+}
+
+function getLineIntersections(shapes, excludeShapeId = null) {
+  const lines = shapes.filter((s) => s.type === 'line' && (!excludeShapeId || s.id !== excludeShapeId));
   const intersections = [];
   for (let i = 0; i < lines.length; i += 1) {
     for (let j = i + 1; j < lines.length; j += 1) {

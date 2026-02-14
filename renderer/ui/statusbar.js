@@ -29,6 +29,10 @@ const SNAP_LABELS = {
   midpoint: 'MID',
   intersection: 'INT',
   quadrant: 'QUA',
+  center: 'CEN',
+  perpendicular: 'PER',
+  tangent: 'TAN',
+  nearest: 'NEA',
   grid: 'GRID',
   off: 'OFF',
 };
@@ -95,11 +99,12 @@ export function initStatusbar({ onOrthoChange, onSnapChange, onGridChange } = {}
   });
 
   return {
-    updateCursor(point, snapType = 'grid', snapEnabled = true) {
+    updateCursor(point, snapType = 'grid', snapEnabled = true, snapStateText = '') {
       if (cursorEl) cursorEl.textContent = `X: ${Math.round(point.x)} mm, Y: ${Math.round(point.y)} mm`;
       if (snapEl) {
         const key = snapEnabled ? (SNAP_LABELS[snapType] ? snapType : 'grid') : 'off';
-        snapEl.textContent = `SNAP: ${SNAP_LABELS[key]}`;
+        const suffix = snapStateText ? ` (${snapStateText})` : '';
+        snapEl.textContent = `SNAP: ${SNAP_LABELS[key]}${suffix}`;
       }
     },
     setTool(toolId) {
