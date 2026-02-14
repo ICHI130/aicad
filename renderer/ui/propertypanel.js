@@ -2,9 +2,53 @@ import { getLineTypeOptions } from '../cad/linetypes.js';
 
 const WIDTH_OPTIONS = [0.13, 0.18, 0.25, 0.35, 0.5, 0.7, 1.0];
 
+// AutoCAD標準8色 + カスタム枠（9番目）
+const PRESET_COLORS = [
+  '#ff0000', // 赤
+  '#ffff00', // 黄
+  '#00ff00', // 緑
+  '#00ffff', // シアン
+  '#0000ff', // 青
+  '#ff00ff', // マゼンタ
+  '#ffffff', // 白
+  '#808080', // グレー
+];
+
 function toNum(v, fallback = 0) {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
+}
+
+/** 現在の選択色がプリセットに含まれるか調べる */
+function findPresetIndex(color) {
+  if (!color) return -1;
+  return PRESET_COLORS.findIndex((c) => c.toLowerCase() === color.toLowerCase());
+}
+
+/**
+ * 9マスのカラーパレットHTMLを生成する。
+ * selectedColor: 現在の色（#xxxxxx形式）
+ * customColor: カスタム枠に使う色（プリセット外の場合に表示）
+ */
+function buildColorPaletteHtml(selectedColor, customColor) {
+  const presetIdx = findPresetIndex(selectedColor);
+  const isCustom = presetIdx === -1;
+  const customDisplay = isCustom ? (selectedColor || customColor || '#00bfff') : (customColor || '#00bfff');
+
+  const swatches = PRESET_COLORS.map((c, i) => {
+    const active = presetIdx === i ? 'active' : '';
+    return `<div class="color-swatch ${active}" data-color="${c}" style="background:${c}" title="${c}"></div>`;
+  }).join('');
+
+  const customActive = isCustom ? 'active' : '';
+  const customSwatch = `
+    <div class="color-swatch custom-swatch ${customActive}" data-color="custom" title="カスタム" style="background:${customDisplay}">
+      <span>＋</span>
+      <input type="color" id="prop-color-custom" value="${customDisplay}" style="opacity:0;position:absolute;width:100%;height:100%;top:0;left:0;cursor:pointer;" />
+    </div>`;
+
+  return `<div class="color-palette">${swatches}${customSwatch}</div>
+    <input type="hidden" id="prop-color" value="${isCustom ? customDisplay : selectedColor || '#00bfff'}" />`;
 }
 
 export function initPropertyPanel({ getSelection, getLayers, onApply }) {
@@ -28,10 +72,14 @@ export function initPropertyPanel({ getSelection, getLayers, onApply }) {
     const lineTypeOptions = lineTypes.map((lt) => `<option value="${lt.id}">${lt.label}</option>`).join('');
     const widthOptions = WIDTH_OPTIONS.map((w) => `<option value="${w}">${w}mm</option>`).join('');
 
+    const currentColor = first.color || '#00bfff';
+    const colorPaletteHtml = buildColorPaletteHtml(currentColor, currentColor);
+
     root.innerHTML = `
       <div class="prop-header"><span>プロパティ</span></div>
       <div class="prop-grid">
-        <label>色</label><input id="prop-color" type="color" value="${first.color || '#00bfff'}" />
+        <label>色</label>
+        <div>${colorPaletteHtml}</div>
         <label>線種</label><select id="prop-linetype">${lineTypeOptions}</select>
         <label>線幅</label><select id="prop-linewidth">${widthOptions}</select>
         <label>レイヤ</label><select id="prop-layer">${layerOptions}</select>
@@ -44,6 +92,34 @@ export function initPropertyPanel({ getSelection, getLayers, onApply }) {
     root.querySelector('#prop-linewidth').value = String(first.linewidth ?? 0.25);
     root.querySelector('#prop-layer').value = first.layerId || 'default';
 
+    // カラースウォッチのクリック処理
+    root.querySelectorAll('.color-swatch:not(.custom-swatch)').forEach((sw) => {
+      sw.addEventListener('click', () => {
+        root.querySelectorAll('.color-swatch').forEach((s) => s.classList.remove('active'));
+        sw.classList.add('active');
+        root.querySelector('#prop-color').value = sw.dataset.color;
+      });
+    });
+
+    // カスタム色ピッカーの変更処理
+    const customInput = root.querySelector('#prop-color-custom');
+    const customSwatch = root.querySelector('.custom-swatch');
+    if (customInput && customSwatch) {
+      customInput.addEventListener('input', () => {
+        const col = customInput.value;
+        customSwatch.style.background = col;
+        root.querySelectorAll('.color-swatch').forEach((s) => s.classList.remove('active'));
+        customSwatch.classList.add('active');
+        root.querySelector('#prop-color').value = col;
+      });
+      customSwatch.addEventListener('click', (e) => {
+        // ラベルのspanをクリックしてもinputが開くようにする
+        if (e.target !== customInput) {
+          customInput.click();
+        }
+      });
+    }
+
     const geo = root.querySelector('#prop-geo');
     if (commonSingle && first.type === 'line') {
       geo.innerHTML = `<div class="prop-geo-grid"><label>X1</label><input id="g-x1" type="number" value="${first.x1}"><label>Y1</label><input id="g-y1" type="number" value="${first.y1}"><label>X2</label><input id="g-x2" type="number" value="${first.x2}"><label>Y2</label><input id="g-y2" type="number" value="${first.y2}"></div>`;
@@ -52,7 +128,7 @@ export function initPropertyPanel({ getSelection, getLayers, onApply }) {
     } else if (commonSingle && first.type === 'rect') {
       geo.innerHTML = `<div class="prop-geo-grid"><label>X</label><input id="g-x" type="number" value="${first.x}"><label>Y</label><input id="g-y" type="number" value="${first.y}"><label>W</label><input id="g-w" type="number" min="0" value="${first.w}"><label>H</label><input id="g-h" type="number" min="0" value="${first.h}"></div>`;
     } else if (commonSingle && first.type === 'text') {
-      geo.innerHTML = `<div class="prop-geo-grid"><label>文字</label><input id="g-text" type="text" value="${first.text || ''}"><label>高さ</label><input id="g-height" type="number" min="0" value="${first.height || 2.5}"><label>回転</label><input id="g-rotation" type="number" value="${first.rotation || 0}"></div>`;
+      geo.innerHTML = `<div class="prop-geo-grid"><label>文字</label><input id="g-text" type="text" value="${first.text || ''}"><label>高さ</label><input id="g-height" type="number" min="0.1" step="0.5" value="${first.height || 2.5}"><label>回転</label><input id="g-rotation" type="number" value="${first.rotation || 0}"></div>`;
     } else {
       geo.innerHTML = `<div class="prop-note">複数選択: 共通プロパティのみ編集できます</div>`;
     }
@@ -85,7 +161,7 @@ export function initPropertyPanel({ getSelection, getLayers, onApply }) {
         });
         if (first.type === 'text') Object.assign(patch, {
           text: root.querySelector('#g-text')?.value ?? first.text,
-          height: Math.max(0, toNum(root.querySelector('#g-height')?.value, first.height || 2.5)),
+          height: Math.max(0.1, toNum(root.querySelector('#g-height')?.value, first.height || 2.5)),
           rotation: toNum(root.querySelector('#g-rotation')?.value, first.rotation || 0),
         });
       }
