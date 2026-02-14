@@ -20,6 +20,15 @@ function createMenu() {
             }
           },
         },
+        {
+          label: 'Print PDF',
+          accelerator: 'CmdOrCtrl+P',
+          click: (_menuItem, browserWindow) => {
+            if (browserWindow) {
+              browserWindow.webContents.send('menu:print');
+            }
+          },
+        },
       ],
     },
   ];
@@ -73,6 +82,29 @@ ipcMain.handle('cad:open-file', async () => {
   return { canceled: false, filePath, content: null, base64, isBinary: false, isDxf: true };
 });
 
+
+
+ipcMain.handle('cad:print-pdf', async (event, options = {}) => {
+  const browserWindow = BrowserWindow.fromWebContents(event.sender);
+  if (!browserWindow) throw new Error('印刷対象のウィンドウが見つかりません。');
+
+  const landscape = Boolean(options.landscape);
+  const pdfBuffer = await browserWindow.webContents.printToPDF({
+    printBackground: true,
+    landscape,
+    preferCSSPageSize: true,
+  });
+
+  const { filePath, canceled } = await dialog.showSaveDialog({
+    filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    defaultPath: landscape ? 'aicad-landscape.pdf' : 'aicad.pdf',
+  });
+
+  if (canceled || !filePath) return { canceled: true };
+
+  await fs.writeFile(filePath, pdfBuffer);
+  return { canceled: false, filePath };
+});
 
 ipcMain.handle('cad:save-dxf', async (_event, content) => {
   const { filePath, canceled } = await dialog.showSaveDialog({
