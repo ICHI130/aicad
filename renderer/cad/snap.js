@@ -109,6 +109,16 @@ function getEndpoints(s) {
     ];
   }
   if (s.type === 'polyline_preview' && Array.isArray(s.points)) return s.points;
+  if ((s.type === 'spline' || s.type === 'revcloud' || s.type === 'wipeout') && Array.isArray(s.points)) return s.points;
+  if (s.type === 'polygon') {
+    const pts = [];
+    const sides = Math.max(3, Math.round(s.sides || 6));
+    for (let i = 0; i < sides; i += 1) {
+      const a = (Math.PI * 2 * i / sides) + ((s.rotation || 0) * Math.PI / 180);
+      pts.push({ x: s.cx + s.r * Math.cos(a), y: s.cy + s.r * Math.sin(a) });
+    }
+    return pts;
+  }
   return [];
 }
 
@@ -138,6 +148,32 @@ function getSegments(s) {
       segments.push({ x1: a.x, y1: a.y, x2: b.x, y2: b.y });
     }
     return segments;
+  }
+
+  if ((s.type === 'spline' || s.type === 'revcloud' || s.type === 'wipeout') && Array.isArray(s.points) && s.points.length >= 2) {
+    const segments = [];
+    for (let i = 0; i < s.points.length - 1; i += 1) {
+      const a = s.points[i];
+      const b = s.points[i + 1];
+      segments.push({ x1: a.x, y1: a.y, x2: b.x, y2: b.y });
+    }
+    if ((s.type === 'revcloud' || s.type === 'wipeout') && s.points.length > 2) {
+      const a = s.points[s.points.length - 1];
+      const b = s.points[0];
+      segments.push({ x1: a.x, y1: a.y, x2: b.x, y2: b.y });
+    }
+    return segments;
+  }
+
+  if (s.type === 'polygon') {
+    const pts = getEndpoints(s);
+    const segs = [];
+    for (let i = 0; i < pts.length; i += 1) {
+      const a = pts[i];
+      const b = pts[(i + 1) % pts.length];
+      segs.push({ x1: a.x, y1: a.y, x2: b.x, y2: b.y });
+    }
+    return segs;
   }
 
   return [];

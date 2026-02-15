@@ -1,6 +1,6 @@
 import { Tool } from './tools.js';
 
-export function buildPreviewShape({ tool, drawingStart, point, polylinePoints, dimState, mleaderState, arcState, ellipseState, arrayState, normalizeRect, arcFromThreePoints, cloneWithOffset }) {
+export function buildPreviewShape({ tool, drawingStart, point, polylinePoints, dimState, mleaderState, arcState, ellipseState, arrayState, splinePoints, polygonState, revcloudPoints, wipeoutPoints, donutState, xlineState, normalizeRect, arcFromThreePoints, cloneWithOffset }) {
   if (tool === Tool.LINE && drawingStart) {
     return { type: 'line', x1: drawingStart.x, y1: drawingStart.y, x2: point.x, y2: point.y };
   }
@@ -32,6 +32,46 @@ export function buildPreviewShape({ tool, drawingStart, point, polylinePoints, d
 
   if (tool === Tool.POLYLINE && polylinePoints.length) {
     return { type: 'polyline_preview', points: [...polylinePoints, point] };
+  }
+
+  if (tool === Tool.SPLINE && splinePoints.length) {
+    return { type: 'spline', points: [...splinePoints, point], closed: false };
+  }
+
+  if (tool === Tool.POLYGON && polygonState?.center) {
+    return {
+      type: 'polygon',
+      cx: polygonState.center.x,
+      cy: polygonState.center.y,
+      r: Math.hypot(point.x - polygonState.center.x, point.y - polygonState.center.y),
+      sides: polygonState.sides || 6,
+      rotation: polygonState.rotation || 0,
+      inscribed: polygonState.inscribed !== false,
+    };
+  }
+
+  if (tool === Tool.REVCLOUD && revcloudPoints.length) {
+    return { type: 'revcloud', points: [...revcloudPoints, point], arcLength: 15 };
+  }
+
+  if (tool === Tool.WIPEOUT && wipeoutPoints.length) {
+    return { type: 'wipeout', points: [...wipeoutPoints, point] };
+  }
+
+  if (tool === Tool.DONUT && donutState?.center) {
+    return {
+      type: 'donut',
+      cx: donutState.center.x,
+      cy: donutState.center.y,
+      innerR: Math.max(0, (donutState.innerDiameter || 0) / 2),
+      outerR: Math.max(0, (donutState.outerDiameter || 50) / 2),
+    };
+  }
+
+  if ((tool === Tool.XLINE || tool === Tool.RAY) && xlineState?.base) {
+    const angle = Math.atan2(point.y - xlineState.base.y, point.x - xlineState.base.x) * 180 / Math.PI;
+    if (tool === Tool.XLINE) return { type: 'xline', x: xlineState.base.x, y: xlineState.base.y, angle };
+    return { type: 'ray', x1: xlineState.base.x, y1: xlineState.base.y, angle };
   }
 
   if (tool === Tool.DIM) {
