@@ -1,7 +1,8 @@
 import { createKonvaCanvas, drawGrid, mmToScreen, screenToMm } from './cad/canvas.js';
 import { Tool, buildShapeNode, normalizeRect } from './cad/tools.js';
 import { findSnapPoint } from './cad/snap.js';
-import { parseDxf, dxfEntitiesToShapes, exportDxf } from './io/dxf.js';
+import { parseDxf, dxfEntitiesToShapes } from './io/dxf.js';
+import { exportDXF } from './io/dxfExport.js';
 import { parseJww, parseJwwBinary, jwwEntitiesToShapes } from './io/jww.js';
 import { initToolbar } from './ui/toolbar.js';
 import { initStatusbar } from './ui/statusbar.js';
@@ -15,6 +16,7 @@ import { initI18n } from './ui/i18n.js';
 import { initPropertyPanel } from './ui/propertypanel.js';
 import { initDynInput } from './ui/dyninput.js';
 import { getDimStyle, setDimStyle } from './ui/dimstyle.js';
+import { currentSpace, getCurrentLayout, initLayoutTabs } from './ui/layout.js';
 
 // ──────────────────────────────────────────────
 // DXF デコード（CP932 対応）
@@ -208,6 +210,7 @@ let gridVisible = true;
 let rightClickMode = 'autocad_like';
 let oneShotSnapMode = null;
 let shiftRightSnapMenu = null;
+let layoutPaperTransform = null;
 
 const persistentSnapModes = new Set(['endpoint', 'midpoint', 'intersection', 'quadrant', 'center']);
 
@@ -660,7 +663,7 @@ function changeTool(nextTool) {
 const toolbar = initToolbar({
   onChangeTool: changeTool,
   onOpenFile: openCadFile,
-  onExportDxf: exportCurrentDxf,
+  onExportDxf: showDxfExportDialog,
   onPrint: printCurrentViewAsPdf,
   onUndo: undo,
   onRedo: redo,
@@ -811,6 +814,12 @@ const cmdline = initCommandLine({
     else if (cmd === 'zoomAll') fitView();
     else if (cmd === 'erase') deleteSelected();
     else if (cmd === 'print') printCurrentViewAsPdf();
+    else if (cmd === 'pdfattach') requestPdfUnderlay();
+    else if (cmd === 'imageclip') applyImageClipToSelection();
+    else if (cmd === 'layout') {
+      const target = currentSpace === 'model' ? 'layout1' : 'model';
+      document.querySelector(`.layout-tab[data-layout="${target}"]`)?.click();
+    }
     else if (cmd === 'audit') showAuditTrail();
     else if (cmd === 'compare') showLastHistoryDiff();
   },
@@ -820,6 +829,12 @@ cmdline.setActiveTool(tool);
 initDimStyleControls();
 loadPlotSettings();
 initRightClickModeControls();
+initLayoutTabs({ onChange: () => redraw() });
+document.getElementById('dxf-export-ok')?.addEventListener('click', () => {
+  exportCurrentDxf();
+  hideDxfExportDialog();
+});
+document.getElementById('dxf-export-cancel')?.addEventListener('click', hideDxfExportDialog);
 
 initSidebar({
   getDrawingContext() {
@@ -1006,6 +1021,10 @@ function showShiftRightSnapMenu(clientX, clientY) {
 
 function getSnap() {
   const raw = pointerToMm();
+  if (currentSpace !== 'model') {
+    latestSnap = { x: raw.x, y: raw.y, type: 'grid' };
+    return { x: raw.x, y: raw.y };
+  }
   if (!snapMode) {
     latestSnap = { x: raw.x, y: raw.y, type: 'grid' };
     return { x: raw.x, y: raw.y };
@@ -1020,6 +1039,10 @@ function pickShape(mmPoint) {
     const s = shapes[i];
     if (!isLayerVisible(s) || isLayerLocked(s)) continue;
     if (s.type === 'rect') {
+      if (mmPoint.x >= s.x && mmPoint.x <= s.x + s.w && mmPoint.y >= s.y && mmPoint.y <= s.y + s.h) return s;
+      continue;
+    }
+    if (s.type === 'image' || s.type === 'pdf_underlay') {
       if (mmPoint.x >= s.x && mmPoint.x <= s.x + s.w && mmPoint.y >= s.y && mmPoint.y <= s.y + s.h) return s;
       continue;
     }
@@ -1247,6 +1270,7 @@ function applyMove(shape, dx, dy) {
     return;
   }
   if (shape.type === 'text' || shape.type === 'point') { shape.x += dx; shape.y += dy; return; }
+  if (shape.type === 'image' || shape.type === 'pdf_underlay') { shape.x += dx; shape.y += dy; return; }
   if (shape.type === 'hatch') {
     if (shape.hatchKind === 'circle') { shape.cx += dx; shape.cy += dy; }
     else { shape.x += dx; shape.y += dy; }
@@ -1533,6 +1557,7 @@ function fitView(targetShapes) {
     if (s.type === 'line' || (s.type === 'dim' && !s.dimType)) { xs.push(s.x1, s.x2); ys.push(s.y1, s.y2); }
     else if (s.type === 'arc' || s.type === 'circle') { xs.push(s.cx - s.r, s.cx + s.r); ys.push(s.cy - s.r, s.cy + s.r); }
     else if (s.type === 'rect') { xs.push(s.x, s.x + s.w); ys.push(s.y, s.y + s.h); }
+    else if (s.type === 'image' || s.type === 'pdf_underlay') { xs.push(s.x, s.x + s.w); ys.push(s.y, s.y + s.h); }
     else if (s.type === 'hatch') {
       if (s.hatchKind === 'circle') { xs.push(s.cx - s.r, s.cx + s.r); ys.push(s.cy - s.r, s.cy + s.r); }
       else { xs.push(s.x, s.x + s.w); ys.push(s.y, s.y + s.h); }
@@ -1550,8 +1575,72 @@ function fitView(targetShapes) {
   redraw();
 }
 
+function getPaperTransform(layout) {
+  if (!layout) return null;
+  const padding = 40;
+  const maxW = stage.width() - padding * 2;
+  const maxH = stage.height() - padding * 2;
+  const scale = Math.min(maxW / layout.paper.width, maxH / layout.paper.height);
+  const x = (stage.width() - layout.paper.width * scale) / 2;
+  const y = (stage.height() - layout.paper.height * scale) / 2;
+  return { x, y, scale };
+}
+
+function drawPaperSpace(layout) {
+  layoutPaperTransform = getPaperTransform(layout);
+  const tr = layoutPaperTransform;
+  if (!tr) return;
+
+  gridLayer.destroyChildren();
+  gridLayer.add(new Konva.Rect({ x: 0, y: 0, width: stage.width(), height: stage.height(), fill: '#6a6a6a' }));
+  gridLayer.draw();
+
+  drawingLayer.add(new Konva.Rect({
+    x: tr.x,
+    y: tr.y,
+    width: layout.paper.width * tr.scale,
+    height: layout.paper.height * tr.scale,
+    fill: '#ffffff',
+    stroke: '#a9a9a9',
+    strokeWidth: 1,
+    listening: false,
+  }));
+
+  for (const vp of layout.viewports || []) {
+    const vpX = tr.x + vp.x * tr.scale;
+    const vpY = tr.y + vp.y * tr.scale;
+    const vpW = vp.w * tr.scale;
+    const vpH = vp.h * tr.scale;
+    const group = new Konva.Group({
+      clipX: vpX,
+      clipY: vpY,
+      clipWidth: vpW,
+      clipHeight: vpH,
+      listening: false,
+    });
+    const modelViewport = { x: viewport.x, y: viewport.y, scale: viewport.scale * vp.scale * 100 };
+    for (const shape of shapes) {
+      if (!isLayerVisible(shape)) continue;
+      const node = buildShapeNode(shape, modelViewport, {
+        layerStyle: getLayer(getShapeLayerId(shape)),
+        plotStyle: plotPreviewActive ? plotSettings.style : 'screen',
+        lineweightScale: plotPreviewActive ? plotSettings.lineweightScale : 1,
+      });
+      node.x(node.x() + vpX);
+      node.y(node.y() + vpY);
+      group.add(node);
+    }
+    drawingLayer.add(group);
+    drawingLayer.add(new Konva.Rect({ x: vpX, y: vpY, width: vpW, height: vpH, stroke: '#4da6ff', strokeWidth: 1, dash: [6, 4], fill: 'transparent', listening: false }));
+  }
+}
+
 function redrawSnapMarker() {
   snapLayer.destroyChildren();
+  if (currentSpace !== 'model') {
+    snapLayer.draw();
+    return;
+  }
   // グリップ描画（選択中の図形）
   if (selectedId) {
     const sel = shapes.find((s) => s.id === selectedId);
@@ -1582,25 +1671,32 @@ function redrawSnapMarker() {
 }
 
 function redraw() {
-  if (gridVisible) {
+  layoutPaperTransform = null;
+  const inPaperSpace = currentSpace !== 'model';
+  if (!inPaperSpace && gridVisible) {
     drawGrid(gridLayer, stage, viewport);
   } else {
     gridLayer.destroyChildren();
     gridLayer.draw();
   }
   drawingLayer.destroyChildren();
-  for (const shape of shapes) {
-    if (!isLayerVisible(shape)) continue;
-    const isSelected = shape.id === selectedId || selectedIds.has(shape.id);
-    const layer = getLayer(getShapeLayerId(shape));
-    drawingLayer.add(buildShapeNode(shape, viewport, {
-      isSelected,
-      layerStyle: layer,
-      plotStyle: plotPreviewActive ? plotSettings.style : 'screen',
-      lineweightScale: plotPreviewActive ? plotSettings.lineweightScale : 1,
-    }));
+  if (inPaperSpace) {
+    const layout = getCurrentLayout();
+    if (layout) drawPaperSpace(layout);
+  } else {
+    for (const shape of shapes) {
+      if (!isLayerVisible(shape)) continue;
+      const isSelected = shape.id === selectedId || selectedIds.has(shape.id);
+      const layer = getLayer(getShapeLayerId(shape));
+      drawingLayer.add(buildShapeNode(shape, viewport, {
+        isSelected,
+        layerStyle: layer,
+        plotStyle: plotPreviewActive ? plotSettings.style : 'screen',
+        lineweightScale: plotPreviewActive ? plotSettings.lineweightScale : 1,
+      }));
+    }
+    if (previewShape) drawingLayer.add(buildShapeNode(previewShape, viewport, { isPreview: true }));
   }
-  if (previewShape) drawingLayer.add(buildShapeNode(previewShape, viewport, { isPreview: true }));
   drawingLayer.draw();
   redrawSnapMarker();
   propertyPanel.refresh();
@@ -2083,9 +2179,66 @@ async function printCurrentViewAsPdf() {
   }
 }
 
+function requestPdfUnderlay() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'application/pdf,.pdf';
+  input.addEventListener('change', async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    const pdfLoaded = file.path && window.cadBridge?.loadPdf ? await window.cadBridge.loadPdf(file.path) : null;
+    const shape = assignCurrentLayer({
+      id: `shape_${crypto.randomUUID()}`,
+      type: 'pdf_underlay',
+      x: 0,
+      y: 0,
+      w: 297,
+      h: 210,
+      path: file.path || file.name,
+      dataUrl: pdfLoaded?.dataUrl,
+      page: 1,
+      opacity: 0.5,
+      name: file.name,
+    });
+    shapes.push(shape);
+    saveHistory();
+    redraw();
+    cmdline.addHistory(`PDFアンダーレイ追加: ${file.name}`, '#4da6ff');
+  });
+  input.click();
+}
+
+function applyImageClipToSelection() {
+  const target = getSelectedShapes().find((shape) => shape.type === 'image' || shape.type === 'pdf_underlay');
+  if (!target) {
+    cmdline.addHistory('IMAGECLIP: image/pdf_underlay を選択してください', '#ff6666');
+    return;
+  }
+  target.clip = {
+    type: 'rect',
+    x: 0,
+    y: 0,
+    w: Math.max(10, (target.w || 100) * 0.6),
+    h: Math.max(10, (target.h || 100) * 0.6),
+  };
+  saveHistory();
+  redraw();
+  cmdline.addHistory('IMAGECLIP: 矩形クリップを適用', '#8aa8c0');
+}
+
+function showDxfExportDialog() {
+  document.getElementById('dxf-export-dialog')?.classList.add('open');
+}
+
+function hideDxfExportDialog() {
+  document.getElementById('dxf-export-dialog')?.classList.remove('open');
+}
+
 function exportCurrentDxf() {
   if (!window.cadBridge?.saveDxf) return;
-  const content = exportDxf(shapes);
+  const version = document.getElementById('dxf-version')?.value || 'R2004';
+  const unit = document.getElementById('dxf-unit')?.value || 'mm';
+  const content = exportDXF(shapes, layers, { version, unit, includeLayerDefs: true });
   window.cadBridge.saveDxf(content);
 }
 
@@ -2222,6 +2375,11 @@ stage.on('mousedown', (event) => {
       isPanning = true;
       panStart = stage.getPointerPosition();
     }
+    return;
+  }
+
+  if (currentSpace !== 'model') {
+    cmdline.setLabel('[レイアウト] モデル空間で作図できます。');
     return;
   }
 
@@ -3064,7 +3222,7 @@ document.addEventListener('keydown', (event) => {
   if (event.ctrlKey || event.metaKey) {
     if (lKey === 'z' && !event.shiftKey) { event.preventDefault(); undo(); return; }
     if (lKey === 'y' || (lKey === 'z' && event.shiftKey)) { event.preventDefault(); redo(); return; }
-    if (lKey === 's') { event.preventDefault(); exportCurrentDxf(); return; }
+    if (lKey === 's') { event.preventDefault(); showDxfExportDialog(); return; }
     if (lKey === 'p') { event.preventDefault(); printCurrentViewAsPdf(); return; }
     if (lKey === 'c') {
       event.preventDefault();

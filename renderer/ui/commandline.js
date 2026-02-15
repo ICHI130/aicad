@@ -74,6 +74,11 @@ const COMMAND_MAP = {
   'dv':   'dim',
   'ml':   'mleader',
   'mleader': 'mleader',
+  'pda': 'pdfattach',
+  'pdfattach': 'pdfattach',
+  'imclip': 'imageclip',
+  'imageclip': 'imageclip',
+  'layout': 'layout',
 };
 
 const TOOL_LABELS = {
@@ -301,6 +306,21 @@ export function initCommandLine({ onToolChange, onCoordInput, onSpecialCommand, 
     if (toolId === 'print') {
       addHistory('印刷(PDF)', '#8aa8c0');
       onSpecialCommand?.('print');
+      return;
+    }
+    if (toolId === 'pdfattach') {
+      addHistory('PDFアンダーレイ添付', '#8aa8c0');
+      onSpecialCommand?.('pdfattach');
+      return;
+    }
+    if (toolId === 'imageclip') {
+      addHistory('イメージクリップ', '#8aa8c0');
+      onSpecialCommand?.('imageclip');
+      return;
+    }
+    if (toolId === 'layout') {
+      addHistory('モデル/レイアウト切替', '#8aa8c0');
+      onSpecialCommand?.('layout');
       return;
     }
 
