@@ -80,6 +80,7 @@ export function buildShapeNode(shape, viewport, options = {}) {
     layerStyle = null,
     plotStyle = 'screen',
     lineweightScale = 1,
+    ltscale = 1,
   } = options;
 
   const resolvedLinewidth = resolveLinewidth(shape.linewidth, layerStyle?.linewidth) * Math.max(0.1, Number(lineweightScale) || 1);
@@ -87,7 +88,8 @@ export function buildShapeNode(shape, viewport, options = {}) {
   const baseColor = isPreview ? COLOR_PREVIEW : isSelected ? COLOR_SELECT : resolveShapeColor(shape, layerStyle);
   const color = plotStyle === 'monochrome' ? toMonochrome(baseColor) : baseColor;
   const linetype = resolveLinetype(shape.linetype, layerStyle?.linetype);
-  const dash = isPreview ? [8, 4] : getDashPattern(linetype, viewport.scale);
+  const effectiveLtscale = Math.max(0.001, (Number(shape.celtscale) || 1) * (Number(ltscale) || 1));
+  const dash = isPreview ? [8, 4] : getDashPattern(linetype, viewport.scale * effectiveLtscale);
 
   if (shape.type === 'line') {
     const p1 = mmToScreen({ x: shape.x1, y: shape.y1 }, viewport);

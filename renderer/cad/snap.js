@@ -1,5 +1,58 @@
 import { snapToGrid } from './canvas.js';
 
+export let polarEnabled = false;
+export let polarAngleStep = 45;
+export let otrackEnabled = false;
+export let trackingPoints = [];
+
+export function setPolarEnabled(on) {
+  polarEnabled = !!on;
+}
+
+export function setPolarAngleStep(step) {
+  const n = Number(step);
+  if (!Number.isFinite(n) || n <= 0) return;
+  polarAngleStep = Math.max(1, Math.min(180, n));
+}
+
+export function setOtrackEnabled(on) {
+  otrackEnabled = !!on;
+  if (!otrackEnabled) trackingPoints = [];
+}
+
+export function addTrackingPoint(point) {
+  if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
+  trackingPoints.push({ x: point.x, y: point.y, type: point.type || 'osnap' });
+  if (trackingPoints.length > 4) trackingPoints = trackingPoints.slice(-4);
+}
+
+export function getTrackingIntersection(cursorMm, viewport) {
+  if (!otrackEnabled || trackingPoints.length === 0) return null;
+  const threshold = 8 / Math.max(0.001, viewport.scale);
+  const vertical = trackingPoints.find((tp) => Math.abs(cursorMm.x - tp.x) <= threshold);
+  const horizontal = trackingPoints.find((tp) => Math.abs(cursorMm.y - tp.y) <= threshold);
+  if (vertical && horizontal) {
+    return { x: vertical.x, y: horizontal.y, type: 'tracking' };
+  }
+  if (vertical) return { x: vertical.x, y: cursorMm.y, type: 'tracking' };
+  if (horizontal) return { x: cursorMm.x, y: horizontal.y, type: 'tracking' };
+  return null;
+}
+
+export function applyPolarTracking(cursorMm, basePt) {
+  if (!polarEnabled || !basePt) return cursorMm;
+  const dx = cursorMm.x - basePt.x;
+  const dy = cursorMm.y - basePt.y;
+  const distLen = Math.hypot(dx, dy);
+  if (distLen < 1e-9) return cursorMm;
+  const angle = normalizeDeg(Math.atan2(dy, dx) * 180 / Math.PI);
+  const snapped = Math.round(angle / polarAngleStep) * polarAngleStep;
+  const diff = Math.abs((((angle - snapped) + 540) % 360) - 180);
+  if (diff > 3) return cursorMm;
+  const rad = (snapped * Math.PI) / 180;
+  return { x: basePt.x + distLen * Math.cos(rad), y: basePt.y + distLen * Math.sin(rad), type: 'polar' };
+}
+
 const SNAP_PRIORITY = ['endpoint', 'intersection', 'midpoint', 'quadrant', 'center', 'perpendicular', 'tangent', 'nearest'];
 
 export function findSnapPoint(mmPoint, shapes, viewport, options = {}) {
