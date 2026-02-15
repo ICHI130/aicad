@@ -16,13 +16,19 @@ export const LINE_TYPES = {
   DIVIDE: { label: '長破線', dash: [32, 6, 2, 6, 2, 6] },
 };
 
+export const BY_LAYER_LINETYPE = 'BYLAYER';
+
 export function getDashPattern(linetype, scale) {
-  const lt = LINE_TYPES[linetype] || LINE_TYPES.CONTINUOUS;
+  const key = linetype === BY_LAYER_LINETYPE ? 'CONTINUOUS' : linetype;
+  const lt = LINE_TYPES[key] || LINE_TYPES.CONTINUOUS;
   if (!lt.dash) return undefined;
   const safeScale = Math.max(scale || 1, 0.5);
   return lt.dash.map((v) => v * safeScale);
 }
 
 export function getLineTypeOptions() {
-  return Object.entries(LINE_TYPES).map(([id, value]) => ({ id, label: value.label }));
+  return [
+    { id: BY_LAYER_LINETYPE, label: 'ByLayer' },
+    ...Object.entries(LINE_TYPES).map(([id, value]) => ({ id, label: value.label })),
+  ];
 }
