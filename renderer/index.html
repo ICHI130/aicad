@@ -526,6 +526,7 @@
       <!-- 左縦ツールパネル -->
       <div id="tool-panel">
         <div id="layer-panel"></div>
+        <div id="symbol-library-panel"></div>
       </div>
 
       <!-- CADキャンバス -->
@@ -692,6 +693,36 @@
           <button class="mode-btn" id="btn-ortho" title="F8: オルソモード">F8 オルソ</button>
           <button class="mode-btn on" id="btn-snap" title="F9: スナップ">F9 スナップ</button>
           <button class="mode-btn on" id="btn-grid" title="F7: グリッド">F7 グリッド</button>
+        </div>
+      </div>
+
+      <div id="quick-props" style="position:fixed; bottom:60px; left:50%; transform:translateX(-50%); background:#2a2a2a; border:1px solid #4da6ff; border-radius:6px; padding:8px 10px; display:none; z-index:200; min-width:240px; box-shadow:0 4px 18px rgba(0,0,0,.35);"></div>
+
+      <div id="hatch-edit-dialog" style="display:none; position:fixed; z-index:1000; left:50%; top:50%; transform:translate(-50%,-50%); background:#2a2a2a; border:1px solid #4da6ff; padding:16px; border-radius:6px; min-width:280px;">
+        <h3 style="color:#e8e8e8; margin:0 0 12px;">ハッチング編集</h3>
+        <div style="display:grid; grid-template-columns:80px 1fr; gap:8px; align-items:center;">
+          <label for="hatch-pattern">パターン</label>
+          <select id="hatch-pattern">
+            <option value="ansi31">ANSI31</option>
+            <option value="cross">Cross</option>
+            <option value="dots">Dots</option>
+          </select>
+          <label for="hatch-angle">角度</label><input id="hatch-angle" type="number" step="1" />
+          <label for="hatch-scale">スケール</label><input id="hatch-scale" type="number" min="0.1" step="0.1" />
+          <label for="hatch-color">色</label><input id="hatch-color" type="color" />
+        </div>
+        <div style="margin-top:12px; display:flex; gap:8px; justify-content:flex-end;">
+          <button id="hatch-ok">OK</button>
+          <button id="hatch-cancel">キャンセル</button>
+        </div>
+      </div>
+
+      <div id="attr-edit-dialog" style="display:none; position:fixed; z-index:1000; left:50%; top:50%; transform:translate(-50%,-50%); background:#2a2a2a; border:1px solid #4da6ff; padding:16px; border-radius:6px; min-width:280px;">
+        <h3 style="color:#e8e8e8; margin:0 0 12px;">属性編集</h3>
+        <div id="attr-fields"></div>
+        <div style="margin-top:12px; display:flex; gap:8px; justify-content:flex-end;">
+          <button id="attr-ok">OK</button>
+          <button id="attr-cancel">キャンセル</button>
         </div>
       </div>
     </div>

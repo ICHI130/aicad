@@ -13,6 +13,7 @@ import { DEFAULT_LAYER_COLOR } from './cad/colors.js';
 import { initLayerPanel } from './ui/layerpanel.js';
 import { initI18n } from './ui/i18n.js';
 import { initPropertyPanel } from './ui/propertypanel.js';
+import { initSymbolLibrary } from './ui/symbollibrary.js';
 import { initDynInput } from './ui/dyninput.js';
 import { getDimStyle, setDimStyle } from './ui/dimstyle.js';
 
@@ -174,6 +175,7 @@ let panStart = null;
 let dragState = null;
 let polylinePoints = [];
 let clipboard = null;
+let pendingSymbolTemplate = null;
 let moveState = null;
 let copyState = null;
 let rotateState = null;
@@ -758,6 +760,13 @@ const layerPanel = initLayerPanel({
   },
 });
 
+const symbolLibrary = initSymbolLibrary({
+  onSelectSymbol(template) {
+    pendingSymbolTemplate = shapeClone(template);
+    statusbar.setCustomGuide(`シンボル配置: ${template.name} をキャンバスでクリック`);
+  },
+});
+
 const statusbar = initStatusbar({
   onOrthoChange(on) { orthoMode = on; },
   onSnapChange(on) { snapMode = on; },
@@ -834,7 +843,7 @@ initSidebar({
       if (s.type === 'dim' && s.dimType === 'radius') return { id: s.id, type: 'dim', dimType: 'radius', cx: s.cx, cy: s.cy, r: s.r, px: s.px, py: s.py, layer };
       if (s.type === 'dim' && s.dimType === 'diameter') return { id: s.id, type: 'dim', dimType: 'diameter', cx: s.cx, cy: s.cy, r: s.r, layer };
       if (s.type === 'dim') return { id: s.id, type: 'dim', x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2, layer };
-      if (s.type === 'hatch') return { id: s.id, type: 'hatch', hatchKind: s.hatchKind, x: s.x, y: s.y, w: s.w, h: s.h, cx: s.cx, cy: s.cy, r: s.r, layer };
+      if (s.type === 'hatch') return { id: s.id, type: 'hatch', hatchKind: s.hatchKind, hatchPattern: s.hatchPattern, hatchAngle: s.hatchAngle, hatchScale: s.hatchScale, x: s.x, y: s.y, w: s.w, h: s.h, cx: s.cx, cy: s.cy, r: s.r, layer };
       return { id: s.id, type: 'rect', x: s.x, y: s.y, w: s.w, h: s.h, layer };
     });
     return { layers: layers.map((layer) => ({ name: layer.name, visible: layer.visible, locked: layer.locked })), elements, selected: selectedId ? [selectedId] : [], bbox: computeBoundingBox(elements) };
@@ -1014,6 +1023,117 @@ function getSnap() {
   return { x: latestSnap.x, y: latestSnap.y };
 }
 
+function getShapeMetrics(shape) {
+  if (!shape) return [];
+  if (shape.type === 'line') {
+    const len = Math.hypot(shape.x2 - shape.x1, shape.y2 - shape.y1);
+    const ang = Math.atan2(shape.y2 - shape.y1, shape.x2 - shape.x1) * 180 / Math.PI;
+    return [`長さ: ${len.toFixed(2)} mm`, `角度: ${ang.toFixed(1)}°`];
+  }
+  if (shape.type === 'circle') {
+    const area = Math.PI * shape.r * shape.r;
+    return [`中心: (${shape.cx.toFixed(1)}, ${shape.cy.toFixed(1)})`, `半径: ${shape.r.toFixed(2)} mm`, `面積: ${area.toFixed(1)} mm²`];
+  }
+  if (shape.type === 'rect') {
+    return [`位置: (${shape.x.toFixed(1)}, ${shape.y.toFixed(1)})`, `W×H: ${shape.w.toFixed(1)} × ${shape.h.toFixed(1)} mm`, `面積: ${(shape.w * shape.h).toFixed(1)} mm²`];
+  }
+  if (shape.type === 'hatch') {
+    const typeLabel = shape.hatchPattern || 'ansi31';
+    const angle = Number(shape.hatchAngle || 0);
+    const scale = Number(shape.hatchScale || 1);
+    return [`パターン: ${typeLabel}`, `角度: ${angle.toFixed(1)}°`, `スケール: ${scale.toFixed(2)}`];
+  }
+  if (shape.type === 'block') {
+    return [`ブロック: ${shape.name || 'Unnamed'}`, `挿入点: (${shape.x.toFixed(1)}, ${shape.y.toFixed(1)})`, `属性: ${(shape.attributes || []).length} 件`];
+  }
+  return [`タイプ: ${shape.type}`];
+}
+
+function updateQuickPropsPanel() {
+  const panel = document.getElementById('quick-props');
+  if (!panel) return;
+  const target = selectedId ? shapes.find((s) => s.id === selectedId) : null;
+  if (!target) {
+    panel.style.display = 'none';
+    panel.innerHTML = '';
+    return;
+  }
+  const rows = getShapeMetrics(target).map((row) => `<div style="font-size:12px;color:#d8e8ff;line-height:1.5;">${row}</div>`).join('');
+  panel.innerHTML = `<div style="font-size:11px;color:#8ec8ff;margin-bottom:4px;">Quick Properties</div>${rows}`;
+  panel.style.display = 'block';
+}
+
+function openHatchEditDialog(shape) {
+  const dialog = document.getElementById('hatch-edit-dialog');
+  if (!dialog) return;
+  const patternEl = document.getElementById('hatch-pattern');
+  const angleEl = document.getElementById('hatch-angle');
+  const scaleEl = document.getElementById('hatch-scale');
+  const colorEl = document.getElementById('hatch-color');
+  const ok = document.getElementById('hatch-ok');
+  const cancel = document.getElementById('hatch-cancel');
+  if (!patternEl || !angleEl || !scaleEl || !colorEl || !ok || !cancel) return;
+
+  patternEl.value = shape.hatchPattern || 'ansi31';
+  angleEl.value = String(shape.hatchAngle || 0);
+  scaleEl.value = String(shape.hatchScale || 1);
+  colorEl.value = shape.color || '#7fd68a';
+  dialog.style.display = 'block';
+
+  const close = () => { dialog.style.display = 'none'; ok.onclick = null; cancel.onclick = null; };
+  ok.onclick = () => {
+    shape.hatchPattern = patternEl.value;
+    shape.hatchAngle = Number(angleEl.value) || 0;
+    shape.hatchScale = Math.max(0.1, Number(scaleEl.value) || 1);
+    shape.color = colorEl.value;
+    saveHistory();
+    redraw();
+    close();
+  };
+  cancel.onclick = close;
+}
+
+function openAttrEditDialog(shape) {
+  const dialog = document.getElementById('attr-edit-dialog');
+  const fields = document.getElementById('attr-fields');
+  const ok = document.getElementById('attr-ok');
+  const cancel = document.getElementById('attr-cancel');
+  if (!dialog || !fields || !ok || !cancel) return;
+
+  fields.innerHTML = '';
+  (shape.attributes || []).forEach((attr, idx) => {
+    const row = document.createElement('div');
+    row.style.display = 'grid';
+    row.style.gridTemplateColumns = '80px 1fr';
+    row.style.gap = '8px';
+    row.style.marginBottom = '8px';
+    row.innerHTML = `<label style="color:#cbd8e6;">${attr.tag}</label><input data-attr-index="${idx}" value="${attr.value || ''}" />`;
+    fields.appendChild(row);
+  });
+  dialog.style.display = 'block';
+
+  const close = () => { dialog.style.display = 'none'; ok.onclick = null; cancel.onclick = null; };
+  ok.onclick = () => {
+    fields.querySelectorAll('input[data-attr-index]').forEach((input) => {
+      const idx = Number(input.getAttribute('data-attr-index'));
+      if (!Number.isFinite(idx) || !shape.attributes[idx]) return;
+      shape.attributes[idx].value = input.value;
+    });
+    saveHistory();
+    redraw();
+    close();
+  };
+  cancel.onclick = close;
+}
+
+function createHatchFromBoundary(shape) {
+  if (!shape) return null;
+  const base = { hatchPattern: 'ansi31', hatchAngle: 45, hatchScale: 1, color: '#7fd68a' };
+  if (shape.type === 'rect') return { ...base, type: 'hatch', hatchKind: 'rect', x: shape.x, y: shape.y, w: shape.w, h: shape.h };
+  if (shape.type === 'circle') return { ...base, type: 'hatch', hatchKind: 'circle', cx: shape.cx, cy: shape.cy, r: shape.r };
+  return null;
+}
+
 function pickShape(mmPoint) {
   const threshold = 12 / viewport.scale;
   for (let i = shapes.length - 1; i >= 0; i -= 1) {
@@ -1058,6 +1178,11 @@ function pickShape(mmPoint) {
       } else if (mmPoint.x >= s.x && mmPoint.x <= s.x + s.w && mmPoint.y >= s.y && mmPoint.y <= s.y + s.h) {
         return s;
       }
+    }
+    if (s.type === 'block') {
+      const bw = Number(s.w) || 1000;
+      const bh = Number(s.d) || 1000;
+      if (mmPoint.x >= s.x && mmPoint.x <= s.x + bw && mmPoint.y >= s.y && mmPoint.y <= s.y + bh) return s;
     }
   }
   return null;
@@ -1250,7 +1375,9 @@ function applyMove(shape, dx, dy) {
   if (shape.type === 'hatch') {
     if (shape.hatchKind === 'circle') { shape.cx += dx; shape.cy += dy; }
     else { shape.x += dx; shape.y += dy; }
+    return;
   }
+  if (shape.type === 'block') { shape.x += dx; shape.y += dy; }
 }
 
 function rotatePoint(px, py, cx, cy, angleDeg) {
@@ -1539,6 +1666,7 @@ function fitView(targetShapes) {
     }
     else if (s.type === 'text' || s.type === 'point') { xs.push(s.x); ys.push(s.y); }
     else if (s.type === 'mleader') { xs.push(s.x1, s.x2, s.x3); ys.push(s.y1, s.y2, s.y3); }
+    else if (s.type === 'block') { const bw = Number(s.w) || 1000; const bh = Number(s.d) || 1000; xs.push(s.x, s.x + bw); ys.push(s.y, s.y + bh); }
   }
   if (!xs.length) return;
   const minX = Math.min(...xs), maxX = Math.max(...xs);
@@ -1604,6 +1732,7 @@ function redraw() {
   drawingLayer.draw();
   redrawSnapMarker();
   propertyPanel.refresh();
+  updateQuickPropsPanel();
 }
 
 // ──────────────────────────────────────────────
@@ -2230,6 +2359,29 @@ stage.on('mousedown', (event) => {
     || moveState?.base || copyState?.base || scaleState?.base || arrayState?.base;
   if (orthoMode && orthoRef) mm = applyOrtho(orthoRef, mm);
   consumeOneShotSnap();
+
+  if (pendingSymbolTemplate) {
+    const id = `shape_${crypto.randomUUID()}`;
+    const block = assignCurrentLayer({
+      id,
+      type: 'block',
+      name: pendingSymbolTemplate.name,
+      w: pendingSymbolTemplate.w,
+      d: pendingSymbolTemplate.d,
+      x: mm.x,
+      y: mm.y,
+      shapes: shapeClone(pendingSymbolTemplate.shapes || []),
+      attributes: shapeClone(pendingSymbolTemplate.attributes || []),
+    });
+    shapes.push(block);
+    selectedId = id;
+    selectedIds.clear();
+    pendingSymbolTemplate = null;
+    symbolLibrary.setPending('');
+    saveHistory();
+    redraw();
+    return;
+  }
 
   // ──── 各ツール処理 ────
 
@@ -2993,7 +3145,17 @@ stage.on('dblclick', () => {
   if (tool !== Tool.SELECT) return;
   const mm = pointerToMm();
   const hit = pickShape(mm);
-  if (!hit || hit.type !== 'text') return;
+  if (!hit) return;
+
+  if (hit.type === 'hatch') {
+    openHatchEditDialog(hit);
+    return;
+  }
+  if (hit.type === 'block' && hit.attributes?.length) {
+    openAttrEditDialog(hit);
+    return;
+  }
+  if (hit.type !== 'text') return;
 
   const shape = hit;
   const screen = mmToScreen({ x: shape.x, y: shape.y }, viewport);
@@ -3038,6 +3200,7 @@ stage.on('dblclick', () => {
     e.stopPropagation();
   });
 });
+
 
 stage.on('wheel', (event) => {
   event.evt.preventDefault();
@@ -3423,6 +3586,11 @@ function shapeTouchesBbox(s, x0, y0, x1, y1) {
     }
     return !(s.x > x1 || s.x + s.w < x0 || s.y > y1 || s.y + s.h < y0);
   }
+  if (s.type === 'block') {
+    const bw = Number(s.w) || 1000;
+    const bh = Number(s.d) || 1000;
+    return !(s.x > x1 || s.x + bw < x0 || s.y > y1 || s.y + bh < y0);
+  }
   return false;
 }
 
@@ -3461,6 +3629,11 @@ function isShapeInBox(s, sx0, sy0, sx1, sy1) {
   if (s.type === 'hatch') {
     if (s.hatchKind === 'circle') return x0 <= s.cx - s.r && s.cx + s.r <= x1 && y0 <= s.cy - s.r && s.cy + s.r <= y1;
     return x0 <= s.x && s.x + s.w <= x1 && y0 <= s.y && s.y + s.h <= y1;
+  }
+  if (s.type === 'block') {
+    const bw = Number(s.w) || 1000;
+    const bh = Number(s.d) || 1000;
+    return x0 <= s.x && s.x + bw <= x1 && y0 <= s.y && s.y + bh <= y1;
   }
   return false;
 }
