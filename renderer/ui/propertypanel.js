@@ -90,6 +90,11 @@ export function initPropertyPanel({ getSelection, getLayers, onApply }) {
         height: Math.max(0.1, toNum(root.querySelector('#g-height')?.value, first.height || 2.5)),
         rotation: toNum(root.querySelector('#g-rotation')?.value, first.rotation || 0),
       });
+      if (first.type === 'hatch') Object.assign(patch, {
+        hatchPattern: root.querySelector('#g-hatch-pattern')?.value || first.hatchPattern || 'ansi31',
+        hatchAngle: toNum(root.querySelector('#g-hatch-angle')?.value, first.hatchAngle || 0),
+        hatchScale: Math.max(0.1, toNum(root.querySelector('#g-hatch-scale')?.value, first.hatchScale || 1)),
+      });
     }
 
     // undefinedプロパティを除去
@@ -202,6 +207,19 @@ export function initPropertyPanel({ getSelection, getLayers, onApply }) {
         <label>大きさ</label><input id="g-height" type="number" min="0.1" step="0.5" value="${first.height || 2.5}">
         <label>回転</label><input id="g-rotation" type="number" value="${first.rotation || 0}">
       </div>`;
+    } else if (commonSingle && first.type === 'hatch') {
+      geo.innerHTML = `<div class="prop-geo-grid">
+        <label>パターン</label>
+        <select id="g-hatch-pattern">
+          <option value="ansi31">ANSI31</option>
+          <option value="cross">Cross</option>
+          <option value="dots">Dots</option>
+        </select>
+        <label>角度</label><input id="g-hatch-angle" type="number" value="${first.hatchAngle || 0}">
+        <label>スケール</label><input id="g-hatch-scale" type="number" min="0.1" step="0.1" value="${first.hatchScale || 1}">
+      </div>`;
+      const patternEl = geo.querySelector('#g-hatch-pattern');
+      if (patternEl) patternEl.value = first.hatchPattern || 'ansi31';
     } else {
       geo.innerHTML = `<div class="prop-note">複数選択: 共通プロパティのみ編集できます</div>`;
     }
@@ -210,7 +228,8 @@ export function initPropertyPanel({ getSelection, getLayers, onApply }) {
     ['#g-x1','#g-y1','#g-x2','#g-y2',
      '#g-cx','#g-cy','#g-r',
      '#g-x','#g-y','#g-w','#g-h',
-     '#g-height','#g-rotation'].forEach((sel) => bindLive(sel));
+     '#g-height','#g-rotation',
+     '#g-hatch-pattern','#g-hatch-angle','#g-hatch-scale'].forEach((sel) => bindLive(sel));
     // テキスト入力はinputイベントで（changeだと確定時のみ）
     bindLive('#g-text', 'input');
   }
