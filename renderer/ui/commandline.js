@@ -94,6 +94,19 @@ const COMMAND_MAP = {
   'log': 'audit',
   'cmp': 'compare',
   'compare': 'compare',
+  'dist': 'dist',
+  'area': 'area',
+  'aa': 'area',
+  'massprop': 'massprop',
+  'id': 'id',
+  'li': 'list',
+  'list': 'list',
+  'ss': 'selectsimilar',
+  'selectsimilar': 'selectsimilar',
+  'pu': 'purge',
+  'purge': 'purge',
+  'ren': 'rename',
+  'rename': 'rename',
   'z':    'zoom',
   'za':   'zoomAll',
   'p':    'print',
@@ -229,6 +242,8 @@ const HELP_TEXT = `コマンド一覧:
   G/UG → グループ化/解除      QS   → クイック選択
   U    → 元に戻す
   AUDIT→ 監査ログ              CMP  → 直前差分
+  DIST/AREA/ID/LI → 図面照会    SS   → 類似選択
+  PU   → 未使用定義削除         REN  → 名前変更
   VLIST→ 保存ビュー一覧        VSAVE 名前 → 現在ビュー保存
   VRESTORE 名前 → 保存ビュー復元
   PLOT → 印刷(PDF)            ZA   → 全体表示
@@ -391,6 +406,11 @@ export function initCommandLine({ onToolChange, onCoordInput, onSpecialCommand, 
       return;
     }
     if (toolId === 'group' || toolId === 'ungroup' || toolId === 'draworder' || toolId === 'qselect') {
+      addHistory(`コマンド: ${raw.toUpperCase()}`, '#8aa8c0');
+      onSpecialCommand?.(toolId);
+      return;
+    }
+    if (['dist', 'area', 'massprop', 'id', 'list', 'selectsimilar', 'purge', 'rename'].includes(toolId)) {
       addHistory(`コマンド: ${raw.toUpperCase()}`, '#8aa8c0');
       onSpecialCommand?.(toolId);
       return;

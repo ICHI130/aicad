@@ -198,6 +198,7 @@ let dimState = { p1: null, p2: null, p3: null, circle: null, mode: 'linear', axi
 let lastDimRef = null;
 let mleaderState = { p1: null, p2: null, text: '' };
 let latestSnap = { x: 0, y: 0, type: 'grid' };
+let inquiryState = { mode: null, points: [] };
 let lastNonSelectTool = Tool.LINE;
 let namedViews = loadNamedViews();
 
@@ -890,6 +891,14 @@ const cmdline = initCommandLine({
     }
     else if (cmd === 'audit') showAuditTrail();
     else if (cmd === 'compare') showLastHistoryDiff();
+    else if (cmd === 'dist') startInquiry('dist');
+    else if (cmd === 'area') startInquiry('area');
+    else if (cmd === 'massprop') startInquiry('massprop');
+    else if (cmd === 'id') startInquiry('id');
+    else if (cmd === 'list') runListCommand();
+    else if (cmd === 'selectsimilar') runSelectSimilar();
+    else if (cmd === 'purge') purgeUnusedDefinitions();
+    else if (cmd === 'rename') renameDefinition();
     else if (cmd === 'group') {
       const ids = [...getSelectionIds()];
       if (ids.length < 2) cmdline.addHistory('GROUP: 2つ以上選択してください', '#cc7777');
@@ -2099,6 +2108,15 @@ function redraw() {
       }));
     }
     if (previewShape) drawingLayer.add(buildShapeNode(previewShape, viewport, { isPreview: true }));
+    if ((inquiryState.mode === 'area' || inquiryState.mode === 'massprop') && inquiryState.points.length > 0) {
+      const pts = inquiryState.points.flatMap((pt) => {
+        const sc = mmToScreen(pt, viewport);
+        return [sc.x, sc.y];
+      });
+      if (pts.length >= 2) {
+        drawingLayer.add(new Konva.Line({ points: pts, stroke: '#66d9ff', strokeWidth: 1.5, dash: [6, 4] }));
+      }
+    }
   }
   drawingLayer.draw();
   redrawSnapMarker();
@@ -2138,6 +2156,7 @@ function escapeCurrentTool() {
   chamferState = { d1: null, d2: null, first: null };
   filletState = { r: null, first: null };
   textState = { point: null, inputEl: null };
+  inquiryState = { mode: null, points: [] };
   tool = Tool.SELECT;
   toolbar.setActive(tool);
   statusbar.setTool(tool);
@@ -2965,6 +2984,189 @@ function runDimSpace(spacing = 10) {
   cmdline.addHistory(`DIMSP: ${dims.length}本を${spacing}mm間隔に整列`, '#4da6ff');
 }
 
+function formatMm(value, digits = 3) {
+  return Number(value || 0).toFixed(digits);
+}
+
+function startInquiry(mode) {
+  inquiryState = { mode, points: [] };
+  if (mode === 'dist') cmdline.setLabel('[DIST] 1点目をクリック:');
+  else if (mode === 'area' || mode === 'massprop') cmdline.setLabel('[AREA] 頂点をクリック [Enter:確定]:');
+  else if (mode === 'id') cmdline.setLabel('[ID] 座標を確認する点をクリック:');
+}
+
+function polygonAreaPerimeter(points) {
+  if (!Array.isArray(points) || points.length < 3) return null;
+  let area2 = 0;
+  let perimeter = 0;
+  for (let i = 0; i < points.length; i += 1) {
+    const a = points[i];
+    const b = points[(i + 1) % points.length];
+    area2 += a.x * b.y - b.x * a.y;
+    perimeter += Math.hypot(b.x - a.x, b.y - a.y);
+  }
+  return { area: Math.abs(area2) / 2, perimeter };
+}
+
+function getShapeInfo(shape) {
+  if (!shape) return [];
+  const layer = getShapeLayerId(shape);
+  const locked = shape.locked ? 'Yes' : 'No';
+  if (shape.type === 'line') {
+    const len = Math.hypot(shape.x2 - shape.x1, shape.y2 - shape.y1);
+    return [
+      `LINE [${shape.id}] layer=${layer} locked=${locked}`,
+      `  start=(${formatMm(shape.x1)}, ${formatMm(shape.y1)}), end=(${formatMm(shape.x2)}, ${formatMm(shape.y2)})`,
+      `  length=${formatMm(len)} mm`,
+    ];
+  }
+  if (shape.type === 'circle') {
+    const area = Math.PI * (shape.r ** 2);
+    return [
+      `CIRCLE [${shape.id}] layer=${layer} locked=${locked}`,
+      `  center=(${formatMm(shape.cx)}, ${formatMm(shape.cy)}), radius=${formatMm(shape.r)} mm`,
+      `  area=${formatMm(area)} mm²`,
+    ];
+  }
+  if (shape.type === 'rect') {
+    return [
+      `RECT [${shape.id}] layer=${layer} locked=${locked}`,
+      `  origin=(${formatMm(shape.x)}, ${formatMm(shape.y)}), w=${formatMm(shape.w)}, h=${formatMm(shape.h)} mm`,
+      `  area=${formatMm(shape.w * shape.h)} mm²`,
+    ];
+  }
+  return [`${String(shape.type || 'shape').toUpperCase()} [${shape.id}] layer=${layer} locked=${locked}`];
+}
+
+function runListCommand() {
+  const selected = getSelectedShapes();
+  if (!selected.length) {
+    cmdline.addHistory('LIST: 図形を選択してください', '#ff6666');
+    return;
+  }
+  for (const shape of selected) {
+    const lines = getShapeInfo(shape);
+    for (const line of lines) cmdline.addHistory(line, '#8aa8c0');
+  }
+}
+
+function runSelectSimilar() {
+  const ref = selectedId ? shapes.find((s) => s.id === selectedId) : getSelectedShapes()[0];
+  if (!ref) {
+    cmdline.addHistory('SELECTSIMILAR: 基準図形を選択してください', '#ff6666');
+    return;
+  }
+  const refLayer = getShapeLayerId(ref);
+  const hits = shapes.filter((s) => s.type === ref.type && getShapeLayerId(s) === refLayer && !s.locked);
+  selectedId = null;
+  selectedIds = new Set(hits.map((s) => s.id));
+  if (hits.length === 1) {
+    selectedId = hits[0].id;
+    selectedIds.clear();
+  }
+  cmdline.addHistory(`SELECTSIMILAR: ${hits.length}件選択`, '#8aa8c0');
+  redraw();
+}
+
+function purgeUnusedDefinitions() {
+  const usedLayerIds = new Set(shapes.map((s) => getShapeLayerId(s)));
+  const before = layers.length;
+  for (let i = layers.length - 1; i >= 0; i -= 1) {
+    const layer = layers[i];
+    if (layer.id === 'default') continue;
+    if (!usedLayerIds.has(layer.id)) layers.splice(i, 1);
+  }
+  const removed = before - layers.length;
+  if (removed > 0) {
+    if (!layers.some((l) => l.id === currentLayerId)) currentLayerId = 'default';
+    saveHistory();
+    layerPanel.refresh();
+    redraw();
+  }
+  cmdline.addHistory(`PURGE: 未使用レイヤー ${removed}件を削除`, '#8aa8c0');
+}
+
+function renameDefinition() {
+  const from = (window.prompt('RENAME: 変更元レイヤー名/ID', '') || '').trim();
+  if (!from) return;
+  const target = layers.find((l) => l.id === from || l.name === from);
+  if (!target) {
+    cmdline.addHistory(`RENAME: '${from}' が見つかりません`, '#ff6666');
+    return;
+  }
+  if (target.id === 'default') {
+    cmdline.addHistory('RENAME: defaultレイヤーは変更できません', '#ff6666');
+    return;
+  }
+  const to = (window.prompt('RENAME: 新しいレイヤー名', target.name) || '').trim();
+  if (!to) return;
+  const nextId = normalizeLayerId(to);
+  if (layers.some((l) => l.id === nextId && l.id !== target.id)) {
+    cmdline.addHistory(`RENAME: '${to}' は既に存在します`, '#ff6666');
+    return;
+  }
+  const prevId = target.id;
+  target.id = nextId;
+  target.name = to;
+  for (const shape of shapes) {
+    if (getShapeLayerId(shape) === prevId) shape.layerId = nextId;
+  }
+  if (currentLayerId === prevId) currentLayerId = nextId;
+  saveHistory();
+  layerPanel.refresh();
+  redraw();
+  cmdline.addHistory(`RENAME: ${from} → ${to}`, '#8aa8c0');
+}
+
+function handleInquiryClick(mm) {
+  if (!inquiryState.mode) return false;
+  if (inquiryState.mode === 'id') {
+    cmdline.addHistory(`ID: X=${formatMm(mm.x)} Y=${formatMm(mm.y)} mm`, '#4da6ff');
+    inquiryState = { mode: null, points: [] };
+    cmdline.setLabel('コマンド:');
+    return true;
+  }
+  if (inquiryState.mode === 'dist') {
+    inquiryState.points.push(mm);
+    if (inquiryState.points.length === 1) {
+      cmdline.setLabel('[DIST] 2点目をクリック:');
+      return true;
+    }
+    const [a, b] = inquiryState.points;
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const dist = Math.hypot(dx, dy);
+    const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+    cmdline.addHistory(`DIST: 距離=${formatMm(dist)} mm 角度=${formatMm(angle, 2)}° ΔX=${formatMm(dx)} ΔY=${formatMm(dy)}`, '#4da6ff');
+    inquiryState = { mode: null, points: [] };
+    cmdline.setLabel('コマンド:');
+    return true;
+  }
+  if (inquiryState.mode === 'area' || inquiryState.mode === 'massprop') {
+    inquiryState.points.push(mm);
+    cmdline.setLabel(`[AREA] 頂点 ${inquiryState.points.length} 点目 [Enter:確定]:`);
+    return true;
+  }
+  return false;
+}
+
+function finalizeInquiryPolygon() {
+  if (inquiryState.mode !== 'area' && inquiryState.mode !== 'massprop') return false;
+  const stats = polygonAreaPerimeter(inquiryState.points);
+  if (!stats) {
+    cmdline.addHistory('AREA: 3点以上指定してください', '#ff6666');
+    return true;
+  }
+  cmdline.addHistory(`AREA: 面積=${formatMm(stats.area)} mm² 周長=${formatMm(stats.perimeter)} mm`, '#4da6ff');
+  if (inquiryState.mode === 'massprop') {
+    cmdline.addHistory(`MASSPROP: 面積=${formatMm(stats.area)} mm²（2D領域のみ対応）`, '#8aa8c0');
+  }
+  inquiryState = { mode: null, points: [] };
+  cmdline.setLabel('コマンド:');
+  redraw();
+  return true;
+}
+
 // ──────────────────────────────────────────────
 // マウスイベント
 // ──────────────────────────────────────────────
@@ -3118,6 +3320,11 @@ stage.on('mousedown', (event) => {
     || moveState?.base || copyState?.base || scaleState?.base || arrayState?.base;
   if (orthoMode && orthoRef) mm = applyOrtho(orthoRef, mm);
   consumeOneShotSnap();
+
+  if (handleInquiryClick(mm)) {
+    redraw();
+    return;
+  }
 
   if (pendingSymbolTemplate) {
     const id = `shape_${crypto.randomUUID()}`;
@@ -4265,6 +4472,7 @@ document.addEventListener('keydown', (event) => {
 
   // Enter（ポリライン確定 / トリムフェーズ切替）
   if (key === 'Enter') {
+    if (finalizeInquiryPolygon()) return;
     if (tool === Tool.POLYLINE) { finishPolyline(false); return; }
     if (tool === Tool.SPLINE && splinePoints.length > 1) {
       shapes.push(assignCurrentLayer({ id: `shape_${crypto.randomUUID()}`, type: 'spline', points: [...splinePoints], closed: false }));
