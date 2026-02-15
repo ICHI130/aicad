@@ -22,6 +22,8 @@ const COMMAND_MAP = {
   'offset': 'offset',
   't':    'text',
   'text': 'text',
+  'mt':   'text',
+  'mtext': 'text',
   'm':    'move',
   'move': 'move',
   'co':   'copy',
@@ -137,7 +139,7 @@ const HELP_TEXT = `コマンド一覧:
   L    → 線 (LINE)          C    → 円 (CIRCLE)
   REC  → 矩形 (RECTANGLE)   EL   → 楕円 (ELLIPSE)
   PL   → ポリライン
-  O    → オフセット          T    → 文字
+  O    → オフセット          T/MT → 文字
   M    → 移動 (MOVE)         CO   → コピー
   RO   → 回転 (ROTATE)       MI   → 鏡像 (MIRROR)
   BR   → ブレーク             LEN  → 長さ変更
