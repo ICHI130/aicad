@@ -2620,8 +2620,7 @@ function openMTextEditor(point, targetShape = null) {
   editor.style.display = 'block';
 
   const lines = targetShape?.content || [{ text: '', bold: mtextStyle.bold, italic: mtextStyle.italic, height: Number(heightEl.value) || 3.5 }];
-  contentEl.value = lines.map((line) => line.text || '').join('
-');
+  contentEl.value = lines.map((line) => line.text || '').join('\n');
   heightEl.value = String(lines[0]?.height || 3.5);
   mtextStyle.bold = !!lines[0]?.bold;
   mtextStyle.italic = !!lines[0]?.italic;
@@ -2644,9 +2643,7 @@ function openMTextEditor(point, targetShape = null) {
   };
 
   okBtn.onclick = () => {
-    const textLines = contentEl.value.split(/
-?
-/);
+    const textLines = contentEl.value.split(/\r?\n/);
     const baseHeight = Math.max(0.5, Number(heightEl.value) || 3.5);
     const content = textLines.map((text) => ({ text, bold: mtextStyle.bold, italic: mtextStyle.italic, height: baseHeight }));
     if (targetShape) {
