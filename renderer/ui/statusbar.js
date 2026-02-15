@@ -43,6 +43,8 @@ const SNAP_LABELS = {
   perpendicular: 'PER',
   tangent: 'TAN',
   nearest: 'NEA',
+  tracking: 'OTR',
+  polar: 'POL',
   grid: 'GRID',
   off: 'OFF',
 };
@@ -81,7 +83,7 @@ const TOOL_GUIDES = {
   mleader:  { 0: '矢印先端をクリック', 1: '引出線の折点をクリック', 2: '注記位置をクリック' },
 };
 
-export function initStatusbar({ onOrthoChange, onSnapChange, onGridChange } = {}) {
+export function initStatusbar({ onOrthoChange, onSnapChange, onGridChange, onPolarChange, onOtrackChange } = {}) {
   const cursorEl = document.getElementById('cursor-pos');
   const toolEl = document.getElementById('status-tool');
   const guideEl = document.getElementById('status-guide');
@@ -89,10 +91,14 @@ export function initStatusbar({ onOrthoChange, onSnapChange, onGridChange } = {}
   const orthoBtn = document.getElementById('btn-ortho');
   const snapBtn = document.getElementById('btn-snap');
   const gridBtn = document.getElementById('btn-grid');
+  const polarBtn = document.getElementById('btn-polar');
+  const otrackBtn = document.getElementById('btn-otrack');
 
   let orthoOn = false;
   let snapOn = true;
   let gridOn = true;
+  let polarOn = false;
+  let otrackOn = false;
 
   function updateModeBtn(btn, on) {
     if (on) btn.classList.add('on');
@@ -116,6 +122,18 @@ export function initStatusbar({ onOrthoChange, onSnapChange, onGridChange } = {}
     gridOn = !gridOn;
     updateModeBtn(gridBtn, gridOn);
     onGridChange?.(gridOn);
+  });
+
+  polarBtn?.addEventListener('click', () => {
+    polarOn = !polarOn;
+    updateModeBtn(polarBtn, polarOn);
+    onPolarChange?.(polarOn);
+  });
+
+  otrackBtn?.addEventListener('click', () => {
+    otrackOn = !otrackOn;
+    updateModeBtn(otrackBtn, otrackOn);
+    onOtrackChange?.(otrackOn);
   });
 
   return {
@@ -161,5 +179,17 @@ export function initStatusbar({ onOrthoChange, onSnapChange, onGridChange } = {}
     isOrthoOn() { return orthoOn; },
     isSnapOn() { return snapOn; },
     isGridOn() { return gridOn; },
+    togglePolar(on) {
+      polarOn = (on !== undefined) ? on : !polarOn;
+      updateModeBtn(polarBtn, polarOn);
+      return polarOn;
+    },
+    toggleOtrack(on) {
+      otrackOn = (on !== undefined) ? on : !otrackOn;
+      updateModeBtn(otrackBtn, otrackOn);
+      return otrackOn;
+    },
+    isPolarOn() { return polarOn; },
+    isOtrackOn() { return otrackOn; },
   };
 }

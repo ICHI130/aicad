@@ -1,6 +1,6 @@
 import { createKonvaCanvas, drawGrid, mmToScreen, screenToMm } from './cad/canvas.js';
 import { Tool, buildShapeNode, normalizeRect } from './cad/tools.js';
-import { findSnapPoint } from './cad/snap.js';
+import { findSnapPoint, applyPolarTracking, setPolarEnabled, setPolarAngleStep, setOtrackEnabled, addTrackingPoint, getTrackingIntersection, trackingPoints, otrackEnabled } from './cad/snap.js';
 import { parseDxf, dxfEntitiesToShapes } from './io/dxf.js';
 import { exportDXF } from './io/dxfExport.js';
 import { parseJww, parseJwwBinary, jwwEntitiesToShapes } from './io/jww.js';
@@ -223,6 +223,9 @@ let rightClickMode = 'autocad_like';
 let oneShotSnapMode = null;
 let shiftRightSnapMenu = null;
 let layoutPaperTransform = null;
+let ltscale = 1.0;
+let globalTransparency = 0;
+let unitsSettings = { lengthPrecision: 0, angleType: 'deg', anglePrecision: 0, insertUnit: 'mm' };
 
 const persistentSnapModes = new Set(['endpoint', 'midpoint', 'intersection', 'quadrant', 'center']);
 
@@ -387,6 +390,41 @@ function initRightClickModeControls() {
   select.addEventListener('change', () => {
     setRightClickMode(select.value);
   });
+}
+
+
+function showUnitsDialog() {
+  const dialog = document.getElementById('units-dialog');
+  if (!dialog) return;
+  const lp = document.getElementById('units-length-prec');
+  const at = document.getElementById('units-angle-type');
+  const ap = document.getElementById('units-angle-prec');
+  const iu = document.getElementById('units-insert');
+  if (lp) lp.value = String(unitsSettings.lengthPrecision);
+  if (at) at.value = unitsSettings.angleType;
+  if (ap) ap.value = String(unitsSettings.anglePrecision);
+  if (iu) iu.value = unitsSettings.insertUnit;
+  dialog.style.display = 'block';
+}
+
+function hideUnitsDialog() {
+  const dialog = document.getElementById('units-dialog');
+  if (dialog) dialog.style.display = 'none';
+}
+
+function initUnitsDialog() {
+  const ok = document.getElementById('units-ok');
+  const cancel = document.getElementById('units-cancel');
+  ok?.addEventListener('click', () => {
+    const lp = Number(document.getElementById('units-length-prec')?.value || 0);
+    const at = document.getElementById('units-angle-type')?.value || 'deg';
+    const ap = Number(document.getElementById('units-angle-prec')?.value || 0);
+    const iu = document.getElementById('units-insert')?.value || 'mm';
+    unitsSettings = { lengthPrecision: lp, angleType: at, anglePrecision: ap, insertUnit: iu };
+    cmdline.addHistory(`UNITS: 精度=${lp}, 角度=${at}, 挿入単位=${iu}`, '#8aa8c0');
+    hideUnitsDialog();
+  });
+  cancel?.addEventListener('click', hideUnitsDialog);
 }
 
 function normalizeLayerId(raw) {
@@ -810,10 +848,22 @@ const statusbar = initStatusbar({
   onOrthoChange(on) { orthoMode = on; },
   onSnapChange(on) { snapMode = on; },
   onGridChange(on) { gridVisible = on; redraw(); },
+  onPolarChange(on) { setPolarEnabled(on); redraw(); },
+  onOtrackChange(on) { setOtrackEnabled(on); redraw(); },
 });
 statusbar.setTool(tool);
 statusbar.setGuide(tool, 0);
 const dynInput = initDynInput();
+
+document.getElementById('btn-polar')?.addEventListener('contextmenu', (event) => {
+  event.preventDefault();
+  const raw = window.prompt('極トラッキング角度(度)', String(45));
+  const step = Number(raw);
+  if (!Number.isFinite(step) || step <= 0) return;
+  setPolarAngleStep(step);
+  cmdline.addHistory(`POLAR角度 = ${step}°`, '#8aa8c0');
+});
+
 
 if (window.cadBridge?.onMenuOpenFile) window.cadBridge.onMenuOpenFile(() => openCadFile());
 if (window.cadBridge?.onMenuPrint) window.cadBridge.onMenuPrint(() => printCurrentViewAsPdf());
@@ -874,6 +924,35 @@ const cmdline = initCommandLine({
         cmdline.addHistory(names.length ? `保存ビュー: ${names.join(', ')}` : '保存ビューはありません', '#8aa8c0');
         return;
       }
+      if (cmd.type === 'ltscale') {
+        if (!Number.isFinite(cmd.value) || cmd.value <= 0) { cmdline.addHistory('LTSCALEは0より大きい数値を入力してください', '#cc7777'); return; }
+        ltscale = cmd.value;
+        cmdline.addHistory(`LTSCALE = ${ltscale}`, '#8aa8c0');
+        redraw();
+        return;
+      }
+      if (cmd.type === 'celtscale') {
+        if (!selectedId) { cmdline.addHistory('CELTSCALE: 先に図形を選択してください', '#cc7777'); return; }
+        if (!Number.isFinite(cmd.value) || cmd.value <= 0) { cmdline.addHistory('CELTSCALEは0より大きい数値を入力してください', '#cc7777'); return; }
+        const shape = shapes.find((s) => s.id === selectedId);
+        if (!shape) return;
+        shape.celtscale = cmd.value;
+        saveHistory();
+        redraw();
+        cmdline.addHistory(`CELTSCALE = ${cmd.value}`, '#8aa8c0');
+        return;
+      }
+      if (cmd.type === 'units') {
+        showUnitsDialog();
+        return;
+      }
+      if (cmd.type === 'transparency') {
+        if (!Number.isFinite(cmd.value)) { cmdline.addHistory('TRANSPARENCY: 数値を入力してください', '#cc7777'); return; }
+        globalTransparency = Math.max(0, Math.min(90, cmd.value));
+        cmdline.addHistory(`TRANSPARENCY = ${globalTransparency}%`, '#8aa8c0');
+        redraw();
+        return;
+      }
     }
 
     if (cmd === 'escape') escapeCurrentTool();
@@ -913,6 +992,7 @@ cmdline.setActiveTool(tool);
 initDimStyleControls();
 loadPlotSettings();
 initRightClickModeControls();
+initUnitsDialog();
 initLayoutTabs({ onChange: () => redraw() });
 document.getElementById('dxf-export-ok')?.addEventListener('click', () => {
   exportCurrentDxf();
@@ -1118,18 +1198,26 @@ function showShiftRightSnapMenu(clientX, clientY) {
   shiftRightSnapMenu.style.display = 'block';
 }
 
-function getSnap() {
+function getSnap(basePt = null) {
   const raw = pointerToMm();
   if (currentSpace !== 'model') {
     latestSnap = { x: raw.x, y: raw.y, type: 'grid' };
     return { x: raw.x, y: raw.y };
   }
-  if (!snapMode) {
+  let mm = { x: raw.x, y: raw.y };
+  if (snapMode) {
+    latestSnap = findSnapPoint(raw, shapes, viewport, { enabledTypes: getActiveSnapModes() });
+    mm = { x: latestSnap.x, y: latestSnap.y };
+  } else {
     latestSnap = { x: raw.x, y: raw.y, type: 'grid' };
-    return { x: raw.x, y: raw.y };
   }
-  latestSnap = findSnapPoint(raw, shapes, viewport, { enabledTypes: getActiveSnapModes() });
-  return { x: latestSnap.x, y: latestSnap.y };
+  const tracking = getTrackingIntersection(raw, viewport);
+  if (tracking) { latestSnap = tracking; mm = { x: tracking.x, y: tracking.y }; }
+  if (basePt) {
+    const polar = applyPolarTracking(mm, basePt);
+    if (polar !== mm) { latestSnap = { x: polar.x, y: polar.y, type: 'polar' }; mm = polar; }
+  }
+  return { x: mm.x, y: mm.y };
 }
 
 function getShapeMetrics(shape) {
@@ -2027,7 +2115,9 @@ function drawPaperSpace(layout) {
         layerStyle: getLayer(getShapeLayerId(shape)),
         plotStyle: plotPreviewActive ? plotSettings.style : 'screen',
         lineweightScale: plotPreviewActive ? plotSettings.lineweightScale : 1,
+        ltscale,
       });
+      applyTransparencyToNode(node, shape, getLayer(getShapeLayerId(shape)));
       node.x(node.x() + vpX);
       node.y(node.y() + vpY);
       group.add(node);
@@ -2050,6 +2140,13 @@ function redrawSnapMarker() {
   }
   if (!latestSnap || latestSnap.type === 'grid') { snapLayer.draw(); return; }
   const p = mmToScreen(latestSnap, viewport);
+  if (otrackEnabled && trackingPoints.length) {
+    for (const tp of trackingPoints) {
+      const tps = mmToScreen(tp, viewport);
+      snapLayer.add(new Konva.Line({ points: [tps.x, 0, tps.x, stage.height()], stroke: '#557799', strokeWidth: 1, dash: [4, 4] }));
+      snapLayer.add(new Konva.Line({ points: [0, tps.y, stage.width(), tps.y], stroke: '#557799', strokeWidth: 1, dash: [4, 4] }));
+    }
+  }
   if (latestSnap.type === 'endpoint' || latestSnap.type === 'quadrant') {
     snapLayer.add(new Konva.Rect({ x: p.x - 4, y: p.y - 4, width: 8, height: 8, stroke: '#00ff66', strokeWidth: 1 }));
   } else if (latestSnap.type === 'midpoint') {
@@ -2068,8 +2165,16 @@ function redrawSnapMarker() {
     snapLayer.add(new Konva.Line({ points: [p.x - 6, p.y + 6, p.x + 6, p.y - 6], stroke: '#ff66aa', strokeWidth: 1 }));
   } else if (latestSnap.type === 'nearest') {
     snapLayer.add(new Konva.Circle({ x: p.x, y: p.y, radius: 3, fill: '#66ffaa', stroke: '#66ffaa' }));
+  } else if (latestSnap.type === 'tracking' || latestSnap.type === 'polar') {
+    snapLayer.add(new Konva.Rect({ x: p.x - 3, y: p.y - 3, width: 6, height: 6, stroke: '#8ad4ff', strokeWidth: 1 }));
   }
   snapLayer.draw();
+}
+
+function applyTransparencyToNode(node, shape, layer) {
+  const val = Number(shape?.transparency ?? layer?.transparency ?? globalTransparency) || 0;
+  const opacity = 1 - Math.max(0, Math.min(90, val)) / 100;
+  if (typeof node?.opacity === 'function') node.opacity(opacity);
 }
 
 function redraw() {
@@ -2091,14 +2196,17 @@ function redraw() {
       if (!isLayerVisible(shape)) continue;
       const isSelected = shape.id === selectedId || selectedIds.has(shape.id);
       const layer = getLayer(getShapeLayerId(shape));
-      drawingLayer.add(buildShapeNode(shape, viewport, {
+      const node = buildShapeNode(shape, viewport, {
         isSelected,
         layerStyle: layer,
         plotStyle: plotPreviewActive ? plotSettings.style : 'screen',
         lineweightScale: plotPreviewActive ? plotSettings.lineweightScale : 1,
-      }));
+        ltscale,
+      });
+      applyTransparencyToNode(node, shape, layer);
+      drawingLayer.add(node);
     }
-    if (previewShape) drawingLayer.add(buildShapeNode(previewShape, viewport, { isPreview: true }));
+    if (previewShape) drawingLayer.add(buildShapeNode(previewShape, viewport, { isPreview: true, ltscale }));
   }
   drawingLayer.draw();
   redrawSnapMarker();
@@ -2969,7 +3077,9 @@ function runDimSpace(spacing = 10) {
 // マウスイベント
 // ──────────────────────────────────────────────
 stage.on('mousemove', () => {
-  let mm = getSnap();
+  const orthoRef = drawingStart || (polylinePoints.length ? polylinePoints[polylinePoints.length - 1] : null)
+    || (moveState?.base) || (copyState?.base) || (scaleState?.base) || (arrayState?.base);
+  let mm = getSnap(orthoRef);
   const activeModesText = oneShotSnapMode ? `TEMP:${oneShotSnapMode.toUpperCase()}` : [...persistentSnapModes].map((m) => m.slice(0, 3).toUpperCase()).join(',');
   statusbar.updateCursor(mm, latestSnap?.type || 'grid', snapMode, activeModesText);
   const pointer = stage.getPointerPosition();
@@ -3019,8 +3129,6 @@ stage.on('mousemove', () => {
   }
 
   // オルソ適用
-  const orthoRef = drawingStart || (polylinePoints.length ? polylinePoints[polylinePoints.length - 1] : null)
-    || (moveState?.base) || (copyState?.base) || (scaleState?.base) || (arrayState?.base);
   if (orthoMode && orthoRef) mm = applyOrtho(orthoRef, mm);
 
   if (pointer && (((tool === Tool.LINE || tool === Tool.RECT || tool === Tool.CIRCLE || tool === Tool.POLYGON || tool === Tool.DONUT) && drawingStart)
@@ -3113,11 +3221,14 @@ stage.on('mousedown', (event) => {
     return;
   }
 
-  let mm = getSnap();
   const orthoRef = drawingStart || (polylinePoints.length ? polylinePoints[polylinePoints.length - 1] : null)
     || moveState?.base || copyState?.base || scaleState?.base || arrayState?.base;
+  let mm = getSnap(orthoRef);
   if (orthoMode && orthoRef) mm = applyOrtho(orthoRef, mm);
   consumeOneShotSnap();
+  if (latestSnap && latestSnap.type && latestSnap.type !== 'grid' && latestSnap.type !== 'polar') {
+    addTrackingPoint(latestSnap);
+  }
 
   if (pendingSymbolTemplate) {
     const id = `shape_${crypto.randomUUID()}`;
@@ -4351,19 +4462,25 @@ document.addEventListener('keydown', (event) => {
   if (key === 'F7') { gridVisible = statusbar.toggleGrid(); redraw(); return; }
   // F9: スナップ切替
   if (key === 'F9') { snapMode = statusbar.toggleSnap(); return; }
-  // F11: 動的入力切替
+  // F10: 極トラッキング切替
+  if (key === 'F10') {
+    const enabled = statusbar.togglePolar();
+    setPolarEnabled(enabled);
+    cmdline.addHistory(`極トラッキング: ${enabled ? 'ON' : 'OFF'}`, '#8aa8c0');
+    return;
+  }
+  // F11: オブジェクトトラッキング切替
   if (key === 'F11') {
+    const enabled = statusbar.toggleOtrack();
+    setOtrackEnabled(enabled);
+    cmdline.addHistory(`オブジェクトトラッキング: ${enabled ? 'ON' : 'OFF'}`, '#8aa8c0');
+    return;
+  }
+  // F12: 動的入力切替
+  if (key === 'F12') {
     event.preventDefault();
     const enabled = dynInput.toggle();
     cmdline.addHistory(`動的入力: ${enabled ? 'ON' : 'OFF'}`, '#8aa8c0');
-    return;
-  }
-  // F10: 右クリックモード切替
-  if (key === 'F10') {
-    const nextMode = rightClickMode === 'autocad_like' ? 'legacy_cancel' : 'autocad_like';
-    setRightClickMode(nextMode);
-    const select = document.getElementById('right-click-mode');
-    if (select) select.value = rightClickMode;
     return;
   }
 

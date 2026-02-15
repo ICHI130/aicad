@@ -781,7 +781,7 @@
                 <option value="legacy_cancel">キャンセル優先（従来）</option>
               </select>
             </label>
-            <div class="settings-note">F10でも切り替えできます。</div>
+            <div class="settings-note">ここでEnter相当/キャンセル優先を切り替えできます。</div>
           </div>
         </div>
       </aside>
@@ -812,6 +812,27 @@
           <button class="mode-btn" id="btn-ortho" title="F8: オルソモード">F8 オルソ</button>
           <button class="mode-btn on" id="btn-snap" title="F9: スナップ">F9 スナップ</button>
           <button class="mode-btn on" id="btn-grid" title="F7: グリッド">F7 グリッド</button>
+          <button class="mode-btn" id="btn-polar" title="F10: 極トラッキング">F10 POLAR</button>
+          <button class="mode-btn" id="btn-otrack" title="F11: オブジェクトトラッキング">F11 OTRACK</button>
+        </div>
+      </div>
+
+
+
+      <div id="units-dialog" style="display:none; position:fixed; z-index:1000; left:50%; top:50%; transform:translate(-50%,-50%); background:#2a2a2a; border:1px solid #4da6ff; padding:16px; border-radius:6px; min-width:300px;">
+        <h3 style="color:#e8e8e8; margin:0 0 12px;">単位設定</h3>
+        <div style="display:grid; grid-template-columns:120px 1fr; gap:8px; align-items:center;">
+          <label for="units-length-prec">長さ精度</label>
+          <select id="units-length-prec"><option value="0">0</option><option value="1">0.0</option><option value="2">0.00</option><option value="3">0.000</option><option value="4">0.0000</option></select>
+          <label for="units-angle-type">角度形式</label>
+          <select id="units-angle-type"><option value="deg">度</option><option value="dms">度分秒</option><option value="rad">ラジアン</option></select>
+          <label for="units-angle-prec">角度精度</label>
+          <select id="units-angle-prec"><option value="0">0</option><option value="1">0.0</option><option value="2">0.00</option><option value="3">0.000</option></select>
+          <label for="units-insert">挿入単位</label>
+          <select id="units-insert"><option value="mm">mm</option><option value="cm">cm</option><option value="m">m</option></select>
+        </div>
+        <div style="margin-top:12px; display:flex; justify-content:flex-end; gap:8px;">
+          <button id="units-cancel">キャンセル</button><button id="units-ok">OK</button>
         </div>
       </div>
 

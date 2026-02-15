@@ -118,6 +118,8 @@ const COMMAND_MAP = {
   'imclip': 'imageclip',
   'imageclip': 'imageclip',
   'layout': 'layout',
+  'un': 'units',
+  'units': 'units',
 };
 
 const TOOL_LABELS = {
@@ -326,6 +328,29 @@ export function initCommandLine({ onToolChange, onCoordInput, onSpecialCommand, 
     inputEl.value = '';
     if (!raw) return;
 
+    const ltsMatch = raw.match(/^ltscale\s+([\d.]+)$/i);
+    if (ltsMatch) {
+      onSpecialCommand?.({ type: 'ltscale', value: Number(ltsMatch[1]) });
+      return;
+    }
+
+    const celtsMatch = raw.match(/^celtscale\s+([\d.]+)$/i);
+    if (celtsMatch) {
+      onSpecialCommand?.({ type: 'celtscale', value: Number(celtsMatch[1]) });
+      return;
+    }
+
+    const trMatch = raw.match(/^transparency\s+([\d.]+)$/i);
+    if (trMatch) {
+      onSpecialCommand?.({ type: 'transparency', value: Number(trMatch[1]) });
+      return;
+    }
+
+    if (/^un(?:its)?$/i.test(raw)) {
+      onSpecialCommand?.({ type: 'units' });
+      return;
+    }
+
     const viewSaveMatch = raw.match(/^vsave\s+(.+)$/i);
     if (viewSaveMatch) {
       const name = viewSaveMatch[1].trim();
@@ -408,6 +433,11 @@ export function initCommandLine({ onToolChange, onCoordInput, onSpecialCommand, 
     if (toolId === 'layout') {
       addHistory('モデル/レイアウト切替', '#8aa8c0');
       onSpecialCommand?.('layout');
+      return;
+    }
+    if (toolId === 'units') {
+      addHistory('単位設定を表示', '#8aa8c0');
+      onSpecialCommand?.({ type: 'units' });
       return;
     }
 
