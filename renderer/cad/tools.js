@@ -20,6 +20,8 @@ export const Tool = {
   RAY: 'ray',
   DIVIDE: 'divide',
   MEASURE: 'measure',
+  MTEXT: 'mtext',
+  TABLE: 'table',
   DIM: 'dim',
   MOVE: 'move',
   COPY: 'copy',
@@ -43,6 +45,7 @@ export const Tool = {
 
 const COLOR_PREVIEW = '#ffff00';  // 黄色（作図中プレビュー)
 const COLOR_SELECT  = '#ff4444';  // 赤（選択中）
+const rasterImageCache = new Map();
 
 
 function resolveLinewidth(shapeLinewidth, layerLinewidth) {
@@ -57,6 +60,17 @@ function resolveLinetype(shapeLinetype, layerLinetype) {
   const normalized = String(shapeLinetype || '').toUpperCase();
   if (!normalized || normalized === 'BYLAYER') return layerLinetype || 'CONTINUOUS';
   return shapeLinetype;
+}
+
+function resolveRasterImage(shape) {
+  if (!shape?.id) return null;
+  if (rasterImageCache.has(shape.id)) return rasterImageCache.get(shape.id);
+  const src = shape.dataUrl || shape.path;
+  if (!src) return null;
+  const img = new window.Image();
+  img.src = src;
+  rasterImageCache.set(shape.id, img);
+  return img;
 }
 
 export function buildShapeNode(shape, viewport, options = {}) {
@@ -537,6 +551,102 @@ export function buildShapeNode(shape, viewport, options = {}) {
     // スクリーンはY下向きなので、テキストをfontSize分上にオフセット
     node.offsetY(fontSize);
     return node;
+  }
+
+  if (shape.type === 'mtext') {
+    const p = mmToScreen({ x: shape.x, y: shape.y }, viewport);
+    const group = new Konva.Group({ id: shape.id, listening: !isPreview });
+    const lines = Array.isArray(shape.content) ? shape.content : [];
+    let offsetY = 0;
+    for (const line of lines) {
+      const text = String(line?.text || '');
+      const lineHeight = Number(line?.height) || shape.height || 3.5;
+      const fontSize = Math.max(8, lineHeight * viewport.scale);
+      const styleTokens = [];
+      if (line?.bold) styleTokens.push('bold');
+      if (line?.italic) styleTokens.push('italic');
+      group.add(new Konva.Text({
+        x: p.x,
+        y: p.y + offsetY,
+        text,
+        fontSize,
+        fill: color,
+        fontFamily: 'MS Gothic, IPAGothic, monospace',
+        fontStyle: styleTokens.join(' '),
+      }));
+      offsetY += fontSize * 1.4;
+    }
+    return group;
+  }
+
+  if (shape.type === 'table') {
+    const group = new Konva.Group({ id: shape.id, listening: !isPreview });
+    const origin = mmToScreen({ x: shape.x, y: shape.y }, viewport);
+    const cols = Math.max(1, Number(shape.cols) || 1);
+    const rows = Math.max(1, Number(shape.rows) || 1);
+    let y = origin.y;
+
+    for (let r = 0; r < rows; r += 1) {
+      let x = origin.x;
+      const rowMm = Number(shape.rowHeights?.[r]) || 10;
+      const rowH = rowMm * viewport.scale;
+      for (let c = 0; c < cols; c += 1) {
+        const colMm = Number(shape.colWidths?.[c]) || 30;
+        const colW = colMm * viewport.scale;
+        group.add(new Konva.Rect({
+          x,
+          y,
+          width: colW,
+          height: rowH,
+          stroke: color,
+          strokeWidth: sw,
+          fill: 'transparent',
+        }));
+        const cellText = String(shape.cells?.[r]?.[c] || '');
+        if (cellText) {
+          group.add(new Konva.Text({
+            x: x + 2,
+            y: y + 2,
+            text: cellText,
+            fontSize: Math.max(8, 2.5 * viewport.scale),
+            fill: color,
+            fontFamily: 'MS Gothic, IPAGothic, monospace',
+          }));
+        }
+        x += colW;
+      }
+      y += rowH;
+    }
+    return group;
+  }
+
+  if (shape.type === 'image' || shape.type === 'pdf_underlay') {
+    const p = mmToScreen({ x: shape.x, y: shape.y }, viewport);
+    const imgNode = new Konva.Image({
+      x: p.x,
+      y: p.y,
+      image: resolveRasterImage(shape),
+      width: (shape.w || 0) * viewport.scale,
+      height: (shape.h || 0) * viewport.scale,
+      opacity: shape.fade != null ? Math.max(0.05, 1 - Number(shape.fade) / 100) : (shape.opacity ?? 1),
+      id: shape.id,
+      listening: !isPreview,
+    });
+    if (shape.clip?.type === 'rect') {
+      imgNode.clipX((shape.clip.x || 0) * viewport.scale);
+      imgNode.clipY((shape.clip.y || 0) * viewport.scale);
+      imgNode.clipWidth((shape.clip.w || shape.w || 0) * viewport.scale);
+      imgNode.clipHeight((shape.clip.h || shape.h || 0) * viewport.scale);
+    }
+
+    if (shape.type === 'pdf_underlay') {
+      const group = new Konva.Group({ id: shape.id, listening: !isPreview });
+      group.add(new Konva.Rect({ x: p.x, y: p.y, width: (shape.w || 0) * viewport.scale, height: (shape.h || 0) * viewport.scale, fill: '#f7f7f7', stroke: '#7f7f7f', strokeWidth: 1, dash }));
+      if (imgNode.image()) group.add(imgNode);
+      group.add(new Konva.Text({ x: p.x + 6, y: p.y + 6, text: shape.name || 'PDF Underlay', fontSize: 10, fill: '#3a3a3a' }));
+      return group;
+    }
+    return imgNode;
   }
 
   if (shape.type === 'point') {
