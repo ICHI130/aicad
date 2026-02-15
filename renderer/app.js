@@ -187,7 +187,8 @@ let scaleState = null;
 let arcState = { p1: null, p2: null };
 let ellipseState = { center: null, rx: null };
 let arrayState = { base: null, source: null, count: 4 };
-let dimState = { p1: null, p2: null, circle: null, mode: 'linear' };
+let dimState = { p1: null, p2: null, p3: null, circle: null, mode: 'linear', axis: 'X', tolPreset: null, baselineCount: 0, centerlineFirst: null };
+let lastDimRef = null;
 let mleaderState = { p1: null, p2: null, text: '' };
 let latestSnap = { x: 0, y: 0, type: 'grid' };
 let lastNonSelectTool = Tool.LINE;
@@ -612,7 +613,7 @@ function changeTool(nextTool) {
   arcState = { p1: null, p2: null };
   ellipseState = { center: null, rx: null };
   arrayState = { base: null, source: null, count: 4 };
-  dimState = { p1: null, p2: null, circle: null, mode: 'linear' };
+  dimState = { p1: null, p2: null, p3: null, circle: null, mode: 'linear', axis: 'X', tolPreset: null, baselineCount: 0, centerlineFirst: null };
   mleaderState = { p1: null, p2: null, text: '' };
   ellipseState = { center: null, rx: null };
   offsetState = { dist: null, base: null };
@@ -798,6 +799,29 @@ if (window.cadBridge?.onMenuPrint) window.cadBridge.onMenuPrint(() => printCurre
 
 const cmdline = initCommandLine({
   onToolChange(toolId) {
+    if (toolId === 'qdim') { runQdim(); return; }
+    if (toolId === 'dimspace') {
+      const raw = window.prompt('寸法間隔(mm)', '10');
+      const spacing = Number(raw);
+      runDimSpace(Number.isFinite(spacing) ? spacing : 10);
+      return;
+    }
+    if (toolId === 'dim_angular') { changeTool(Tool.DIM); dimState.mode = 'angular'; cmdline.setLabel('[寸法] 角の頂点をクリック:'); return; }
+    if (toolId === 'dim_continue') { changeTool(Tool.DIM); dimState.mode = 'continue'; cmdline.setLabel('[寸法] 直列寸法: 次点をクリック'); return; }
+    if (toolId === 'dim_baseline') { changeTool(Tool.DIM); dimState.mode = 'baseline'; dimState.baselineCount = 0; cmdline.setLabel('[寸法] 並列寸法: 目標点をクリック'); return; }
+    if (toolId === 'dim_ordinate') { changeTool(Tool.DIM); dimState.mode = 'ordinate'; cmdline.setLabel('[寸法] 計測点をクリック:'); return; }
+    if (toolId === 'dim_tolerance') {
+      const symbol = window.prompt('公差記号', '⌀') || '⌀';
+      const value1 = window.prompt('公差値1', '0.05') || '0.05';
+      const datum = window.prompt('データム', 'A') || 'A';
+      changeTool(Tool.DIM);
+      dimState.mode = 'tolerance';
+      dimState.tolPreset = { symbol, value1, datum };
+      cmdline.setLabel('[寸法] 幾何公差の配置点をクリック:');
+      return;
+    }
+    if (toolId === 'dim_centermark') { changeTool(Tool.DIM); dimState.mode = 'centermark'; cmdline.setLabel('[寸法] 中心マーク: 円をクリック'); return; }
+    if (toolId === 'dim_centerline') { changeTool(Tool.DIM); dimState.mode = 'centerline'; cmdline.setLabel('[寸法] 中心線: 1点目をクリック'); return; }
     changeTool(toolId);
   },
   onCoordInput(str) {
@@ -866,6 +890,9 @@ initSidebar({
       if (s.type === 'point') return { id: s.id, type: 'point', x: s.x, y: s.y, layer };
       if (s.type === 'dim' && s.dimType === 'radius') return { id: s.id, type: 'dim', dimType: 'radius', cx: s.cx, cy: s.cy, r: s.r, px: s.px, py: s.py, layer };
       if (s.type === 'dim' && s.dimType === 'diameter') return { id: s.id, type: 'dim', dimType: 'diameter', cx: s.cx, cy: s.cy, r: s.r, layer };
+      if (s.type === 'dim' && s.dimType === 'angular') return { id: s.id, type: 'dim', dimType: 'angular', cx: s.cx, cy: s.cy, pt1x: s.pt1x, pt1y: s.pt1y, pt2x: s.pt2x, pt2y: s.pt2y, layer };
+      if (s.type === 'dim' && s.dimType === 'ordinate') return { id: s.id, type: 'dim', dimType: 'ordinate', x: s.x, y: s.y, tx: s.tx, ty: s.ty, axis: s.axis, layer };
+      if (s.type === 'dim' && ['tolerance', 'centermark', 'centerline'].includes(s.dimType)) return { id: s.id, type: 'dim', dimType: s.dimType, ...s, layer };
       if (s.type === 'dim') return { id: s.id, type: 'dim', x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2, layer };
       if (s.type === 'hatch') return { id: s.id, type: 'hatch', hatchKind: s.hatchKind, x: s.x, y: s.y, w: s.w, h: s.h, cx: s.cx, cy: s.cy, r: s.r, layer };
       return { id: s.id, type: 'rect', x: s.x, y: s.y, w: s.w, h: s.h, layer };
@@ -952,6 +979,11 @@ function computeBoundingBox(elements) {
     else if (e.type === 'text' || e.type === 'point') { xs.push(e.x); ys.push(e.y); }
     else if (e.type === 'dim' && e.dimType === 'radius') { xs.push(e.cx, e.px); ys.push(e.cy, e.py); }
     else if (e.type === 'dim' && e.dimType === 'diameter') { xs.push(e.cx - e.r, e.cx + e.r); ys.push(e.cy - e.r, e.cy + e.r); }
+    else if (e.type === 'dim' && e.dimType === 'angular') { xs.push(e.cx, e.pt1x, e.pt2x); ys.push(e.cy, e.pt1y, e.pt2y); }
+    else if (e.type === 'dim' && e.dimType === 'ordinate') { xs.push(e.x, e.tx); ys.push(e.y, e.ty); }
+    else if (e.type === 'dim' && e.dimType === 'tolerance') { xs.push(e.x); ys.push(e.y); }
+    else if (e.type === 'dim' && e.dimType === 'centermark') { xs.push(e.cx - e.r, e.cx + e.r); ys.push(e.cy - e.r, e.cy + e.r); }
+    else if (e.type === 'dim' && e.dimType === 'centerline') { xs.push(e.x1, e.x2); ys.push(e.y1, e.y2); }
     else if (e.type === 'dim') { xs.push(e.x1, e.x2); ys.push(e.y1, e.y2); }
     else if (e.type === 'hatch') {
       if (e.hatchKind === 'circle') { xs.push(e.cx - e.r, e.cx + e.r); ys.push(e.cy - e.r, e.cy + e.r); }
@@ -1291,6 +1323,11 @@ function applyMove(shape, dx, dy) {
   if (shape.type === 'dim') {
     if (shape.dimType === 'radius') { shape.cx += dx; shape.cy += dy; shape.px += dx; shape.py += dy; return; }
     if (shape.dimType === 'diameter') { shape.cx += dx; shape.cy += dy; return; }
+    if (shape.dimType === 'angular') { shape.cx += dx; shape.cy += dy; shape.pt1x += dx; shape.pt1y += dy; shape.pt2x += dx; shape.pt2y += dy; return; }
+    if (shape.dimType === 'ordinate') { shape.x += dx; shape.y += dy; shape.tx += dx; shape.ty += dy; return; }
+    if (shape.dimType === 'tolerance') { shape.x += dx; shape.y += dy; return; }
+    if (shape.dimType === 'centermark') { shape.cx += dx; shape.cy += dy; return; }
+    if (shape.dimType === 'centerline') { shape.x1 += dx; shape.y1 += dy; shape.x2 += dx; shape.y2 += dy; return; }
     shape.x1 += dx; shape.y1 += dy; shape.x2 += dx; shape.y2 += dy;
     return;
   }
@@ -1738,7 +1775,7 @@ function escapeCurrentTool() {
   arcState = { p1: null, p2: null };
   ellipseState = { center: null, rx: null };
   arrayState = { base: null, source: null, count: 4 };
-  dimState = { p1: null, p2: null, circle: null, mode: 'linear' };
+  dimState = { p1: null, p2: null, p3: null, circle: null, mode: 'linear', axis: 'X', tolPreset: null, baselineCount: 0, centerlineFirst: null };
   mleaderState = { p1: null, p2: null, text: '' };
   offsetState = { dist: null, base: null };
   mirrorState = { p1: null };
@@ -1817,10 +1854,13 @@ function handleCommandOption(toolId, option) {
     return true;
   }
 
-  if (toolId === Tool.DIM && dimState.mode !== option && ['linear', 'radius', 'diameter'].includes(option)) {
-    dimState = { p1: null, p2: null, circle: null, mode: option };
+  if (toolId === Tool.DIM && dimState.mode !== option && ['linear', 'radius', 'diameter', 'angular', 'ordinate', 'tolerance', 'centermark', 'centerline', 'continue', 'baseline'].includes(option)) {
+    dimState = { p1: null, p2: null, p3: null, circle: null, mode: option, axis: 'X', tolPreset: null, baselineCount: 0, centerlineFirst: null };
     if (option === 'radius') cmdline.setLabel('[寸法] 半径寸法: 円をクリック');
     else if (option === 'diameter') cmdline.setLabel('[寸法] 直径寸法: 円をクリック');
+    else if (option === 'angular') cmdline.setLabel('[寸法] 角の頂点をクリック');
+    else if (option === 'ordinate') cmdline.setLabel('[寸法] 座標寸法: 計測点をクリック');
+    else if (option === 'centermark') cmdline.setLabel('[寸法] 中心マーク: 円をクリック');
     else cmdline.setLabel('[寸法] 線形寸法: 始点をクリック');
     statusbar.setGuide(Tool.DIM, 0);
     redraw();
@@ -1841,18 +1881,23 @@ function handleCmdlineCoord(str) {
   if (tool === Tool.DIM) {
     const mode = str.trim().toLowerCase();
     if (mode === 'r') {
-      dimState = { p1: null, p2: null, circle: null, mode: 'radius' };
+      dimState = { p1: null, p2: null, p3: null, circle: null, mode: 'radius', axis: 'X', tolPreset: null, baselineCount: 0, centerlineFirst: null };
       cmdline.setLabel('[寸法] 半径寸法: 円をクリック');
       return;
     }
     if (mode === 'd') {
-      dimState = { p1: null, p2: null, circle: null, mode: 'diameter' };
+      dimState = { p1: null, p2: null, p3: null, circle: null, mode: 'diameter', axis: 'X', tolPreset: null, baselineCount: 0, centerlineFirst: null };
       cmdline.setLabel('[寸法] 直径寸法: 円をクリック');
       return;
     }
     if (mode === '' || mode === 'l') {
-      dimState = { p1: null, p2: null, circle: null, mode: 'linear' };
+      dimState = { p1: null, p2: null, p3: null, circle: null, mode: 'linear', axis: 'X', tolPreset: null, baselineCount: 0, centerlineFirst: null };
       cmdline.setLabel('[寸法] 線形寸法: 始点をクリック');
+      return;
+    }
+    if (mode === 'a') {
+      dimState = { p1: null, p2: null, p3: null, circle: null, mode: 'angular', axis: 'X', tolPreset: null, baselineCount: 0, centerlineFirst: null };
+      cmdline.setLabel('[寸法] 角の頂点をクリック');
       return;
     }
   }
@@ -2274,6 +2319,93 @@ function exportCurrentDxf() {
   window.cadBridge.saveDxf(content);
 }
 
+function addLinearDim(p1, p2, placement, fixed = null) {
+  const dir = fixed?.dir || (Math.abs(p2.x - p1.x) > Math.abs(p2.y - p1.y) ? 'h' : 'v');
+  const offset = Number.isFinite(fixed?.offset)
+    ? fixed.offset
+    : (dir === 'h' ? placement.y - p1.y : placement.x - p1.x);
+  const dim = assignCurrentLayer({ id: `shape_${crypto.randomUUID()}`, type: 'dim', x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y, offset, dir });
+  shapes.push(dim);
+  lastDimRef = { ...dim };
+  return dim;
+}
+
+function addAngularDim(vertex, edge1Point, edge2Point, arcPoint) {
+  const dim = assignCurrentLayer({
+    id: `shape_${crypto.randomUUID()}`,
+    type: 'dim',
+    dimType: 'angular',
+    cx: vertex.x,
+    cy: vertex.y,
+    pt1x: edge1Point.x,
+    pt1y: edge1Point.y,
+    pt2x: edge2Point.x,
+    pt2y: edge2Point.y,
+    arcR: Math.max(1, Math.hypot(arcPoint.x - vertex.x, arcPoint.y - vertex.y)),
+  });
+  shapes.push(dim);
+  return dim;
+}
+
+function extractShapeKeyPoints(shape) {
+  if (shape.type === 'line') return [{ x: shape.x1, y: shape.y1 }, { x: shape.x2, y: shape.y2 }];
+  if (shape.type === 'rect') return [
+    { x: shape.x, y: shape.y },
+    { x: shape.x + shape.w, y: shape.y },
+    { x: shape.x + shape.w, y: shape.y + shape.h },
+    { x: shape.x, y: shape.y + shape.h },
+  ];
+  return [];
+}
+
+function runQdim() {
+  const targetIds = selectedId ? [selectedId] : [...selectedIds];
+  const targetShapes = targetIds.length ? shapes.filter((s) => targetIds.includes(s.id)) : [];
+  const source = targetShapes.length ? targetShapes : shapes;
+  const points = source.flatMap(extractShapeKeyPoints);
+  if (points.length < 2) {
+    cmdline.addHistory('QDIM: 2点以上の抽出に失敗しました', '#ff6666');
+    return;
+  }
+  points.sort((a, b) => a.x - b.x);
+  const uniq = [];
+  for (const p of points) {
+    if (!uniq.length || Math.hypot(p.x - uniq[uniq.length - 1].x, p.y - uniq[uniq.length - 1].y) > 1e-6) uniq.push(p);
+  }
+  const baseY = Math.max(...uniq.map((p) => p.y)) + 20;
+  let count = 0;
+  for (let i = 0; i < uniq.length - 1; i += 1) {
+    addLinearDim(uniq[i], uniq[i + 1], { x: 0, y: baseY }, { dir: 'h', offset: baseY - uniq[i].y });
+    count += 1;
+  }
+  if (!count) {
+    cmdline.addHistory('QDIM: 寸法を作成できませんでした', '#ff6666');
+    return;
+  }
+  saveHistory();
+  redraw();
+  cmdline.addHistory(`QDIM: ${count}本の寸法を作成`, '#4da6ff');
+}
+
+function runDimSpace(spacing = 10) {
+  const dims = (selectedId ? [selectedId] : [...selectedIds])
+    .map((id) => shapes.find((s) => s.id === id))
+    .filter((s) => s?.type === 'dim' && !s?.dimType);
+  if (dims.length < 2) {
+    cmdline.addHistory('DIMSP: 2本以上の線形寸法を選択してください', '#ff6666');
+    return;
+  }
+  const base = dims[0];
+  const ordered = dims.slice(1).sort((a, b) => Math.abs(a.offset) - Math.abs(b.offset));
+  ordered.forEach((dim, idx) => {
+    dim.dir = base.dir;
+    dim.offset = base.offset + spacing * (idx + 1);
+  });
+  saveHistory();
+  redraw();
+  cmdline.addHistory(`DIMSP: ${dims.length}本を${spacing}mm間隔に整列`, '#4da6ff');
+}
+
 // ──────────────────────────────────────────────
 // マウスイベント
 // ──────────────────────────────────────────────
@@ -2638,6 +2770,64 @@ stage.on('mousedown', (event) => {
   }
 
   if (tool === Tool.DIM) {
+    if (dimState.mode === 'angular') {
+      if (!dimState.p1) { dimState.p1 = mm; cmdline.setLabel('[寸法] 第1辺上の点をクリック:'); return; }
+      if (!dimState.p2) { dimState.p2 = mm; cmdline.setLabel('[寸法] 第2辺上の点をクリック:'); return; }
+      if (!dimState.p3) { dimState.p3 = mm; cmdline.setLabel('[寸法] 寸法弧の位置をクリック:'); return; }
+      addAngularDim(dimState.p1, dimState.p2, dimState.p3, mm);
+      dimState = { p1: null, p2: null, p3: null, circle: null, mode: 'angular', axis: 'X', tolPreset: null, baselineCount: 0, centerlineFirst: null };
+      previewShape = null;
+      saveHistory();
+      redraw();
+      return;
+    }
+    if (dimState.mode === 'ordinate') {
+      if (!dimState.p1) { dimState.p1 = mm; cmdline.setLabel('[寸法] テキスト位置をクリック:'); return; }
+      const axis = Math.abs(mm.x - dimState.p1.x) >= Math.abs(mm.y - dimState.p1.y) ? 'X' : 'Y';
+      shapes.push(assignCurrentLayer({ id: `shape_${crypto.randomUUID()}`, type: 'dim', dimType: 'ordinate', x: dimState.p1.x, y: dimState.p1.y, tx: mm.x, ty: mm.y, axis }));
+      dimState = { p1: null, p2: null, p3: null, circle: null, mode: 'ordinate', axis: 'X', tolPreset: null, baselineCount: 0, centerlineFirst: null };
+      saveHistory();
+      redraw();
+      return;
+    }
+    if (dimState.mode === 'tolerance') {
+      const preset = dimState.tolPreset || { symbol: '⌀', value1: '0.05', datum: 'A' };
+      shapes.push(assignCurrentLayer({ id: `shape_${crypto.randomUUID()}`, type: 'dim', dimType: 'tolerance', x: mm.x, y: mm.y, symbol: preset.symbol, value1: preset.value1, value2: '', datum: preset.datum }));
+      saveHistory();
+      redraw();
+      return;
+    }
+    if (dimState.mode === 'centermark') {
+      const hit = pickShape(mm);
+      if (!hit || hit.type !== 'circle') return;
+      shapes.push(assignCurrentLayer({ id: `shape_${crypto.randomUUID()}`, type: 'dim', dimType: 'centermark', cx: hit.cx, cy: hit.cy, r: hit.r, size: 5 }));
+      saveHistory();
+      redraw();
+      return;
+    }
+    if (dimState.mode === 'centerline') {
+      if (!dimState.centerlineFirst) { dimState.centerlineFirst = mm; cmdline.setLabel('[寸法] 中心線2点目をクリック:'); return; }
+      shapes.push(assignCurrentLayer({ id: `shape_${crypto.randomUUID()}`, type: 'dim', dimType: 'centerline', x1: dimState.centerlineFirst.x, y1: dimState.centerlineFirst.y, x2: mm.x, y2: mm.y }));
+      dimState.centerlineFirst = null;
+      saveHistory();
+      redraw();
+      return;
+    }
+    if (dimState.mode === 'continue') {
+      if (!lastDimRef || lastDimRef.type !== 'dim' || lastDimRef.dimType) { cmdline.addHistory('DCO: 直前の線形寸法が必要です', '#ff6666'); return; }
+      addLinearDim({ x: lastDimRef.x2, y: lastDimRef.y2 }, mm, mm, { dir: lastDimRef.dir, offset: lastDimRef.offset });
+      saveHistory();
+      redraw();
+      return;
+    }
+    if (dimState.mode === 'baseline') {
+      if (!lastDimRef || lastDimRef.type !== 'dim' || lastDimRef.dimType) { cmdline.addHistory('DBA: 直前の線形寸法が必要です', '#ff6666'); return; }
+      dimState.baselineCount += 1;
+      addLinearDim({ x: lastDimRef.x1, y: lastDimRef.y1 }, mm, mm, { dir: lastDimRef.dir, offset: lastDimRef.offset + dimState.baselineCount * 10 });
+      saveHistory();
+      redraw();
+      return;
+    }
     if (dimState.mode === 'radius') {
       if (!dimState.circle) {
         const hit = pickShape(mm);
@@ -2657,7 +2847,7 @@ stage.on('mousedown', (event) => {
         px: mm.x,
         py: mm.y,
       }));
-      dimState = { p1: null, p2: null, circle: null, mode: 'radius' };
+      dimState = { p1: null, p2: null, p3: null, circle: null, mode: 'radius', axis: 'X', tolPreset: null, baselineCount: 0, centerlineFirst: null };
       previewShape = null;
       saveHistory();
       redraw();
@@ -2680,13 +2870,14 @@ stage.on('mousedown', (event) => {
     }
     if (!dimState.p1) { dimState.p1 = mm; statusbar.setGuide(tool, 1); return; }
     if (!dimState.p2) { dimState.p2 = mm; statusbar.setGuide(tool, 2); return; }
-    const dir = Math.abs(dimState.p2.x - dimState.p1.x) > Math.abs(dimState.p2.y - dimState.p1.y) ? 'h' : 'v';
-    const offset = dir === 'h' ? mm.y - dimState.p1.y : mm.x - dimState.p1.x;
-    shapes.push(assignCurrentLayer({ id: `shape_${crypto.randomUUID()}`, type: 'dim', x1: dimState.p1.x, y1: dimState.p1.y, x2: dimState.p2.x, y2: dimState.p2.y, offset, dir }));
-    dimState = { p1: null, p2: null, circle: null, mode: 'linear' }; previewShape = null;
-    saveHistory(); redraw();
+    addLinearDim(dimState.p1, dimState.p2, mm);
+    dimState = { p1: null, p2: null, p3: null, circle: null, mode: 'linear', axis: 'X', tolPreset: null, baselineCount: 0, centerlineFirst: null };
+    previewShape = null;
+    saveHistory();
+    redraw();
     return;
   }
+
 
   if (tool === Tool.MLEADER) {
     if (!mleaderState.p1) {
