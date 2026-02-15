@@ -102,8 +102,22 @@ const COMMAND_MAP = {
   'dim':  'dim',
   'dli':  'dim',
   'dv':   'dim',
+  'dan':  'dim_angular',
+  'dco':  'dim_continue',
+  'dba':  'dim_baseline',
+  'dor':  'dim_ordinate',
+  'tol':  'dim_tolerance',
+  'dce':  'dim_centermark',
+  'cl':   'dim_centerline',
+  'qdim': 'qdim',
+  'dimsp': 'dimspace',
   'ml':   'mleader',
   'mleader': 'mleader',
+  'pda': 'pdfattach',
+  'pdfattach': 'pdfattach',
+  'imclip': 'imageclip',
+  'imageclip': 'imageclip',
+  'layout': 'layout',
 };
 
 const TOOL_LABELS = {
@@ -142,6 +156,15 @@ const TOOL_LABELS = {
   scale:    '尺度',
   erase:    '削除',
   dim:      '寸法',
+  dim_angular: '角度寸法',
+  dim_continue: '直列寸法',
+  dim_baseline: '並列寸法',
+  dim_ordinate: '座標寸法',
+  dim_tolerance: '幾何公差',
+  dim_centermark: '中心マーク',
+  dim_centerline: '中心線',
+  qdim: 'クイック寸法',
+  dimspace: '寸法間隔',
   mleader:  '引出線',
   mtext:    'マルチテキスト',
   table:    '表',
@@ -281,6 +304,8 @@ export function initCommandLine({ onToolChange, onCoordInput, onSpecialCommand, 
       diameter: 'diameter',
       l: 'linear',
       linear: 'linear',
+      a: 'angular',
+      angular: 'angular',
     },
     polygon: {
       i: 'inscribed',
@@ -368,6 +393,21 @@ export function initCommandLine({ onToolChange, onCoordInput, onSpecialCommand, 
     if (toolId === 'group' || toolId === 'ungroup' || toolId === 'draworder' || toolId === 'qselect') {
       addHistory(`コマンド: ${raw.toUpperCase()}`, '#8aa8c0');
       onSpecialCommand?.(toolId);
+      return;
+    }
+    if (toolId === 'pdfattach') {
+      addHistory('PDFアンダーレイ添付', '#8aa8c0');
+      onSpecialCommand?.('pdfattach');
+      return;
+    }
+    if (toolId === 'imageclip') {
+      addHistory('イメージクリップ', '#8aa8c0');
+      onSpecialCommand?.('imageclip');
+      return;
+    }
+    if (toolId === 'layout') {
+      addHistory('モデル/レイアウト切替', '#8aa8c0');
+      onSpecialCommand?.('layout');
       return;
     }
 

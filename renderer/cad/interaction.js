@@ -75,8 +75,25 @@ export function buildPreviewShape({ tool, drawingStart, point, polylinePoints, d
   }
 
   if (tool === Tool.DIM) {
+    if (dimState.mode === 'angular' && dimState.p1 && dimState.p2 && dimState.p3) {
+      return {
+        type: 'dim',
+        dimType: 'angular',
+        cx: dimState.p1.x,
+        cy: dimState.p1.y,
+        pt1x: dimState.p2.x,
+        pt1y: dimState.p2.y,
+        pt2x: dimState.p3.x,
+        pt2y: dimState.p3.y,
+        arcR: Math.max(1, Math.hypot(point.x - dimState.p1.x, point.y - dimState.p1.y)),
+      };
+    }
     if (dimState.mode === 'radius' && dimState.circle) {
       return { type: 'dim', dimType: 'radius', cx: dimState.circle.cx, cy: dimState.circle.cy, r: dimState.circle.r, px: point.x, py: point.y };
+    }
+    if (dimState.mode === 'ordinate' && dimState.p1) {
+      const axis = Math.abs(point.x - dimState.p1.x) >= Math.abs(point.y - dimState.p1.y) ? 'X' : 'Y';
+      return { type: 'dim', dimType: 'ordinate', x: dimState.p1.x, y: dimState.p1.y, tx: point.x, ty: point.y, axis };
     }
     if (dimState.p1 && dimState.p2) {
       const dir = Math.abs(dimState.p2.x - dimState.p1.x) > Math.abs(dimState.p2.y - dimState.p1.y) ? 'h' : 'v';

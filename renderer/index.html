@@ -550,6 +550,60 @@
         display: none;
         z-index: 10;
       }
+
+      #layout-tabs {
+        position: fixed;
+        bottom: 32px;
+        left: 0;
+        right: 0;
+        background: #1a1a1a;
+        border-top: 1px solid #333;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        height: 28px;
+        padding: 0 8px;
+        z-index: 120;
+      }
+      .layout-tab {
+        padding: 3px 10px;
+        border: 1px solid #444;
+        border-radius: 4px 4px 0 0;
+        font-size: 12px;
+        cursor: pointer;
+      }
+      .layout-tab.active { background: #2e4f7a; border-color: #4da6ff; }
+      #add-layout, #add-viewport {
+        border: 1px solid #444;
+        background: #232323;
+        color: #ddd;
+        border-radius: 4px;
+        width: 24px;
+        height: 22px;
+        cursor: pointer;
+      }
+
+      #dxf-export-dialog {
+        position: fixed;
+        inset: 0;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.45);
+        z-index: 400;
+      }
+      #dxf-export-dialog.open { display: flex; }
+      .dxf-export-card {
+        background: #212121;
+        border: 1px solid #4da6ff;
+        border-radius: 8px;
+        padding: 14px;
+        min-width: 320px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .dxf-export-actions { display: flex; justify-content: flex-end; gap: 8px; }
     </style>
   </head>
   <body>
@@ -557,6 +611,7 @@
       <!-- 左縦ツールパネル -->
       <div id="tool-panel">
         <div id="layer-panel"></div>
+        <div id="symbol-library-panel"></div>
       </div>
 
       <!-- CADキャンバス -->
@@ -741,6 +796,13 @@
       </div>
 
       <!-- ステータスバー -->
+      <div id="layout-tabs">
+        <div class="layout-tab active" data-layout="model">モデル</div>
+        <div class="layout-tab" data-layout="layout1">Layout1</div>
+        <button id="add-layout" title="レイアウト追加">+</button>
+        <button id="add-viewport" title="ビューポート追加">VP+</button>
+      </div>
+
       <div class="statusbar">
         <span id="cursor-pos">X: 0 mm, Y: 0 mm</span>
         <span id="status-tool">ツール: 選択</span>
@@ -750,6 +812,59 @@
           <button class="mode-btn" id="btn-ortho" title="F8: オルソモード">F8 オルソ</button>
           <button class="mode-btn on" id="btn-snap" title="F9: スナップ">F9 スナップ</button>
           <button class="mode-btn on" id="btn-grid" title="F7: グリッド">F7 グリッド</button>
+        </div>
+      </div>
+
+      <div id="quick-props" style="position:fixed; bottom:60px; left:50%; transform:translateX(-50%); background:#2a2a2a; border:1px solid #4da6ff; border-radius:6px; padding:8px 10px; display:none; z-index:200; min-width:240px; box-shadow:0 4px 18px rgba(0,0,0,.35);"></div>
+
+      <div id="hatch-edit-dialog" style="display:none; position:fixed; z-index:1000; left:50%; top:50%; transform:translate(-50%,-50%); background:#2a2a2a; border:1px solid #4da6ff; padding:16px; border-radius:6px; min-width:280px;">
+        <h3 style="color:#e8e8e8; margin:0 0 12px;">ハッチング編集</h3>
+        <div style="display:grid; grid-template-columns:80px 1fr; gap:8px; align-items:center;">
+          <label for="hatch-pattern">パターン</label>
+          <select id="hatch-pattern">
+            <option value="ansi31">ANSI31</option>
+            <option value="cross">Cross</option>
+            <option value="dots">Dots</option>
+          </select>
+          <label for="hatch-angle">角度</label><input id="hatch-angle" type="number" step="1" />
+          <label for="hatch-scale">スケール</label><input id="hatch-scale" type="number" min="0.1" step="0.1" />
+          <label for="hatch-color">色</label><input id="hatch-color" type="color" />
+        </div>
+        <div style="margin-top:12px; display:flex; gap:8px; justify-content:flex-end;">
+          <button id="hatch-ok">OK</button>
+          <button id="hatch-cancel">キャンセル</button>
+        </div>
+      </div>
+
+      <div id="attr-edit-dialog" style="display:none; position:fixed; z-index:1000; left:50%; top:50%; transform:translate(-50%,-50%); background:#2a2a2a; border:1px solid #4da6ff; padding:16px; border-radius:6px; min-width:280px;">
+        <h3 style="color:#e8e8e8; margin:0 0 12px;">属性編集</h3>
+        <div id="attr-fields"></div>
+        <div style="margin-top:12px; display:flex; gap:8px; justify-content:flex-end;">
+          <button id="attr-ok">OK</button>
+          <button id="attr-cancel">キャンセル</button>
+        </div>
+      </div>
+
+      <div id="dxf-export-dialog">
+        <div class="dxf-export-card">
+          <div>DXF書き出し設定</div>
+          <label>バージョン
+            <select id="dxf-version">
+              <option value="R12">R12</option>
+              <option value="R2004" selected>R2004</option>
+              <option value="R2013">R2013</option>
+            </select>
+          </label>
+          <label>単位
+            <select id="dxf-unit">
+              <option value="mm" selected>ミリメートル</option>
+              <option value="m">メートル</option>
+            </select>
+          </label>
+          <div class="dxf-export-actions">
+            <button id="dxf-export-cancel">キャンセル</button>
+            <button id="dxf-export-ok">書き出し</button>
+          </div>
         </div>
       </div>
     </div>
