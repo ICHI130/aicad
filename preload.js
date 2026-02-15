@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('aiBridge', {
 contextBridge.exposeInMainWorld('cadBridge', {
   openFile: () => ipcRenderer.invoke('cad:open-file'),
   saveDxf: (content) => ipcRenderer.invoke('cad:save-dxf', content),
+  loadPdf: (filePath) => ipcRenderer.invoke('pdf:load', filePath),
   printPdf: (options) => ipcRenderer.invoke('cad:print-pdf', options),
   onMenuOpenFile: (callback) => {
     const listener = () => callback();

@@ -118,6 +118,14 @@ ipcMain.handle('cad:save-dxf', async (_event, content) => {
   return { canceled: false, filePath };
 });
 
+ipcMain.handle('pdf:load', async (_event, filePath) => {
+  const buffer = await fs.readFile(filePath);
+  return {
+    filePath,
+    dataUrl: `data:application/pdf;base64,${buffer.toString('base64')}`,
+  };
+});
+
 ipcMain.handle('ai:set-claude-api-key', (_event, apiKey) => {
   claudeApiKey = typeof apiKey === 'string' ? apiKey.trim() : '';
   return { ok: true, configured: Boolean(claudeApiKey) };
