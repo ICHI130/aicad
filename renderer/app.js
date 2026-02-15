@@ -173,6 +173,12 @@ let isPanning = false;
 let panStart = null;
 let dragState = null;
 let polylinePoints = [];
+let splinePoints = [];
+let polygonState = { sides: 6, center: null, inscribed: true };
+let revcloudPoints = [];
+let wipeoutPoints = [];
+let donutState = { innerDiameter: 0, outerDiameter: 50, center: null };
+let xlineState = { base: null };
 let clipboard = null;
 let moveState = null;
 let copyState = null;
@@ -593,6 +599,12 @@ function changeTool(nextTool) {
   drawingStart = null;
   previewShape = null;
   polylinePoints = [];
+  splinePoints = [];
+  polygonState = { sides: polygonState.sides || 6, center: null, inscribed: polygonState.inscribed !== false };
+  revcloudPoints = [];
+  wipeoutPoints = [];
+  donutState = { innerDiameter: donutState.innerDiameter || 0, outerDiameter: donutState.outerDiameter || 50, center: null };
+  xlineState = { base: null };
   moveState = null;
   copyState = null;
   rotateState = null;
@@ -643,6 +655,20 @@ function changeTool(nextTool) {
   } else if (tool === Tool.HATCH) {
     cmdline.setLabel('[ハッチ] 境界(矩形/円)をクリック:');
     statusbar.setCustomGuide('境界をクリックしてハッチ作成');
+  } else if (tool === Tool.SPLINE) {
+    cmdline.setLabel('[スプライン] 制御点をクリック [Enter/右クリック:確定]:');
+  } else if (tool === Tool.POLYGON) {
+    cmdline.setLabel(`[正多角形] 辺数を入力 [3-32] (現在:${polygonState.sides || 6}) または中心をクリック:`);
+  } else if (tool === Tool.REVCLOUD) {
+    cmdline.setLabel('[雲マーク] クリックで点追加 [Enter/右クリック:確定]:');
+  } else if (tool === Tool.WIPEOUT) {
+    cmdline.setLabel('[ワイプアウト] クリックで頂点追加 [Enter/右クリック:確定]:');
+  } else if (tool === Tool.DONUT) {
+    cmdline.setLabel(`[ドーナツ] 内径=${donutState.innerDiameter} 外径=${donutState.outerDiameter} 中心をクリック:`);
+  } else if (tool === Tool.XLINE || tool === Tool.RAY) {
+    cmdline.setLabel(tool === Tool.XLINE ? '[構築線] 通過点をクリック:' : '[放射線] 始点をクリック:');
+  } else if (tool === Tool.DIVIDE || tool === Tool.MEASURE) {
+    cmdline.setLabel(tool === Tool.DIVIDE ? '[ディバイダ] 分割対象をクリック:' : '[計測] 対象をクリック:');
   } else if (tool === Tool.JOIN) {
     runJoinCommand();
     changeTool(Tool.SELECT);
@@ -829,6 +855,13 @@ initSidebar({
       if (s.type === 'arc') return { id: s.id, type: 'arc', cx: s.cx, cy: s.cy, r: s.r, startAngle: s.startAngle, endAngle: s.endAngle, layer };
       if (s.type === 'circle') return { id: s.id, type: 'circle', cx: s.cx, cy: s.cy, r: s.r, layer };
       if (s.type === 'ellipse') return { id: s.id, type: 'ellipse', cx: s.cx, cy: s.cy, rx: s.rx, ry: s.ry, rotation: s.rotation || 0, layer };
+      if (s.type === 'polygon') return { id: s.id, type: 'polygon', cx: s.cx, cy: s.cy, r: s.r, sides: s.sides, layer };
+      if (s.type === 'spline') return { id: s.id, type: 'spline', points: s.points, layer };
+      if (s.type === 'revcloud') return { id: s.id, type: 'revcloud', points: s.points, layer };
+      if (s.type === 'wipeout') return { id: s.id, type: 'wipeout', points: s.points, layer };
+      if (s.type === 'donut') return { id: s.id, type: 'donut', cx: s.cx, cy: s.cy, innerR: s.innerR, outerR: s.outerR, layer };
+      if (s.type === 'xline') return { id: s.id, type: 'xline', x: s.x, y: s.y, angle: s.angle, layer };
+      if (s.type === 'ray') return { id: s.id, type: 'ray', x1: s.x1, y1: s.y1, angle: s.angle, layer };
       if (s.type === 'text') return { id: s.id, type: 'text', x: s.x, y: s.y, text: s.text, height: s.height, rotation: s.rotation, layer };
       if (s.type === 'point') return { id: s.id, type: 'point', x: s.x, y: s.y, layer };
       if (s.type === 'dim' && s.dimType === 'radius') return { id: s.id, type: 'dim', dimType: 'radius', cx: s.cx, cy: s.cy, r: s.r, px: s.px, py: s.py, layer };
@@ -1029,6 +1062,28 @@ function pickShape(mmPoint) {
     }
     if (s.type === 'arc' || s.type === 'circle') {
       if (Math.abs(Math.hypot(mmPoint.x - s.cx, mmPoint.y - s.cy) - s.r) <= threshold) return s;
+      continue;
+    }
+    if (s.type === 'donut') {
+      const d = Math.hypot(mmPoint.x - s.cx, mmPoint.y - s.cy);
+      if (d >= s.innerR - threshold && d <= s.outerR + threshold) return s;
+      continue;
+    }
+    if (s.type === 'polygon') {
+      if (Math.abs(Math.hypot(mmPoint.x - s.cx, mmPoint.y - s.cy) - s.r) <= threshold * 2) return s;
+      continue;
+    }
+    if (s.type === 'xline' || s.type === 'ray') {
+      const angle = (s.angle || 0) * Math.PI / 180;
+      const p0 = { x: s.x ?? s.x1, y: s.y ?? s.y1 };
+      const p1 = { x: p0.x + Math.cos(angle) * 10000, y: p0.y + Math.sin(angle) * 10000 };
+      if (distancePointToSegment(mmPoint, p0, p1) <= threshold * 1.5) return s;
+      continue;
+    }
+    if ((s.type === 'spline' || s.type === 'revcloud' || s.type === 'wipeout') && Array.isArray(s.points)) {
+      for (let j = 1; j < s.points.length; j += 1) {
+        if (distancePointToSegment(mmPoint, s.points[j - 1], s.points[j]) <= threshold) return s;
+      }
       continue;
     }
     if (s.type === 'ellipse') {
@@ -1240,6 +1295,13 @@ function applyMove(shape, dx, dy) {
     return;
   }
   if (shape.type === 'arc' || shape.type === 'circle' || shape.type === 'ellipse') { shape.cx += dx; shape.cy += dy; return; }
+  if (shape.type === 'polygon' || shape.type === 'donut') { shape.cx += dx; shape.cy += dy; return; }
+  if (shape.type === 'xline') { shape.x += dx; shape.y += dy; return; }
+  if (shape.type === 'ray') { shape.x1 += dx; shape.y1 += dy; return; }
+  if ((shape.type === 'spline' || shape.type === 'revcloud' || shape.type === 'wipeout') && Array.isArray(shape.points)) {
+    shape.points = shape.points.map((p) => ({ x: p.x + dx, y: p.y + dy }));
+    return;
+  }
   if (shape.type === 'mleader') {
     shape.x1 += dx; shape.y1 += dy;
     shape.x2 += dx; shape.y2 += dy;
@@ -1285,6 +1347,17 @@ function applyRotate(shape, center, angleDeg) {
     const c = rotatePoint(shape.cx, shape.cy, center.x, center.y, angleDeg);
     shape.cx = c.x; shape.cy = c.y;
     if (shape.type === 'arc') { shape.startAngle += angleDeg; shape.endAngle += angleDeg; }
+  } else if (shape.type === 'polygon' || shape.type === 'donut') {
+    const c = rotatePoint(shape.cx, shape.cy, center.x, center.y, angleDeg);
+    shape.cx = c.x; shape.cy = c.y;
+    if (shape.type === 'polygon') shape.rotation = (shape.rotation || 0) + angleDeg;
+  } else if (shape.type === 'xline' || shape.type === 'ray') {
+    const p = rotatePoint(shape.x ?? shape.x1, shape.y ?? shape.y1, center.x, center.y, angleDeg);
+    if (shape.type === 'xline') { shape.x = p.x; shape.y = p.y; }
+    else { shape.x1 = p.x; shape.y1 = p.y; }
+    shape.angle = (shape.angle || 0) + angleDeg;
+  } else if ((shape.type === 'spline' || shape.type === 'revcloud' || shape.type === 'wipeout') && Array.isArray(shape.points)) {
+    shape.points = shape.points.map((p) => rotatePoint(p.x, p.y, center.x, center.y, angleDeg));
   } else if (shape.type === 'hatch') {
     if (shape.hatchKind === 'circle') {
       const c = rotatePoint(shape.cx, shape.cy, center.x, center.y, angleDeg);
@@ -1342,6 +1415,26 @@ function applyScale(shape, base, ratio) {
     shape.cy = c.y;
     shape.rx *= ratio;
     shape.ry *= ratio;
+    return;
+  }
+  if (shape.type === 'polygon') {
+    const c = scalePoint(shape.cx, shape.cy);
+    shape.cx = c.x; shape.cy = c.y; shape.r *= ratio;
+    return;
+  }
+  if (shape.type === 'donut') {
+    const c = scalePoint(shape.cx, shape.cy);
+    shape.cx = c.x; shape.cy = c.y; shape.innerR *= ratio; shape.outerR *= ratio;
+    return;
+  }
+  if (shape.type === 'xline' || shape.type === 'ray') {
+    const p = scalePoint(shape.x ?? shape.x1, shape.y ?? shape.y1);
+    if (shape.type === 'xline') { shape.x = p.x; shape.y = p.y; }
+    else { shape.x1 = p.x; shape.y1 = p.y; }
+    return;
+  }
+  if ((shape.type === 'spline' || shape.type === 'revcloud' || shape.type === 'wipeout') && Array.isArray(shape.points)) {
+    shape.points = shape.points.map((pt) => scalePoint(pt.x, pt.y));
     return;
   }
   if (shape.type === 'text') {
@@ -1424,6 +1517,17 @@ function mirrorShape(shape, p1, p2) {
   } else if (s.type === 'arc' || s.type === 'circle' || s.type === 'ellipse') {
     const mc = mirrorPoint(s.cx, s.cy, p1, p2);
     s.cx = mc.x; s.cy = mc.y;
+  } else if (s.type === 'polygon' || s.type === 'donut') {
+    const mc = mirrorPoint(s.cx, s.cy, p1, p2);
+    s.cx = mc.x; s.cy = mc.y;
+  } else if (s.type === 'xline' || s.type === 'ray') {
+    const mp = mirrorPoint(s.x ?? s.x1, s.y ?? s.y1, p1, p2);
+    const dir = mirrorPoint((s.x ?? s.x1) + Math.cos((s.angle || 0) * Math.PI / 180), (s.y ?? s.y1) + Math.sin((s.angle || 0) * Math.PI / 180), p1, p2);
+    if (s.type === 'xline') { s.x = mp.x; s.y = mp.y; }
+    else { s.x1 = mp.x; s.y1 = mp.y; }
+    s.angle = Math.atan2(dir.y - mp.y, dir.x - mp.x) * 180 / Math.PI;
+  } else if ((s.type === 'spline' || s.type === 'revcloud' || s.type === 'wipeout') && Array.isArray(s.points)) {
+    s.points = s.points.map((pt) => mirrorPoint(pt.x, pt.y, p1, p2));
   } else if (s.type === 'rect') {
     const corners = [
       mirrorPoint(s.x, s.y, p1, p2),
@@ -1538,6 +1642,12 @@ function fitView(targetShapes) {
       else { xs.push(s.x, s.x + s.w); ys.push(s.y, s.y + s.h); }
     }
     else if (s.type === 'text' || s.type === 'point') { xs.push(s.x); ys.push(s.y); }
+    else if (s.type === 'polygon') { xs.push(s.cx - s.r, s.cx + s.r); ys.push(s.cy - s.r, s.cy + s.r); }
+    else if (s.type === 'donut') { xs.push(s.cx - s.outerR, s.cx + s.outerR); ys.push(s.cy - s.outerR, s.cy + s.outerR); }
+    else if (s.type === 'xline' || s.type === 'ray') { xs.push(s.x ?? s.x1); ys.push(s.y ?? s.y1); }
+    else if ((s.type === 'spline' || s.type === 'revcloud' || s.type === 'wipeout') && Array.isArray(s.points)) {
+      for (const pt of s.points) { xs.push(pt.x); ys.push(pt.y); }
+    }
     else if (s.type === 'mleader') { xs.push(s.x1, s.x2, s.x3); ys.push(s.y1, s.y2, s.y3); }
   }
   if (!xs.length) return;
@@ -1589,7 +1699,8 @@ function redraw() {
     gridLayer.draw();
   }
   drawingLayer.destroyChildren();
-  for (const shape of shapes) {
+  const orderedShapes = [...shapes].sort((a, b) => Number(a.type === 'wipeout') - Number(b.type === 'wipeout'));
+  for (const shape of orderedShapes) {
     if (!isLayerVisible(shape)) continue;
     const isSelected = shape.id === selectedId || selectedIds.has(shape.id);
     const layer = getLayer(getShapeLayerId(shape));
@@ -1614,6 +1725,12 @@ function escapeCurrentTool() {
   drawingStart = null;
   previewShape = null;
   polylinePoints = [];
+  splinePoints = [];
+  polygonState = { sides: polygonState.sides || 6, center: null, inscribed: polygonState.inscribed !== false };
+  revcloudPoints = [];
+  wipeoutPoints = [];
+  donutState = { innerDiameter: donutState.innerDiameter || 0, outerDiameter: donutState.outerDiameter || 50, center: null };
+  xlineState = { base: null };
   moveState = null;
   copyState = null;
   rotateState = null;
@@ -1707,6 +1824,12 @@ function handleCommandOption(toolId, option) {
     else cmdline.setLabel('[寸法] 線形寸法: 始点をクリック');
     statusbar.setGuide(Tool.DIM, 0);
     redraw();
+    return true;
+  }
+
+  if (toolId === Tool.POLYGON && (option === 'inscribed' || option === 'circumscribed')) {
+    polygonState.inscribed = option === 'inscribed';
+    cmdline.addHistory(`POLYGON: ${polygonState.inscribed ? '内接' : '外接'}モード`, '#8aa8c0');
     return true;
   }
 
@@ -1852,6 +1975,68 @@ function handleCmdlineCoord(str) {
       redraw();
       cmdline.setPrompt(tool, 0);
     }
+  } else if (tool === Tool.SPLINE) {
+    const pt = handleCoordInput(str, splinePoints[splinePoints.length - 1] || null, null);
+    if (!pt) return;
+    splinePoints.push(pt);
+    redraw();
+  } else if (tool === Tool.POLYGON) {
+    const n = parseInt(str, 10);
+    if (!Number.isNaN(n) && n >= 3 && n <= 32) {
+      polygonState.sides = n;
+      cmdline.addHistory(`POLYGON 辺数: ${n}`, '#8aa8c0');
+      return;
+    }
+    const token = str.trim().toLowerCase();
+    if (token === 'i') { polygonState.inscribed = true; return; }
+    if (token === 'c') { polygonState.inscribed = false; return; }
+    const pt = handleCoordInput(str, polygonState.center || null, null);
+    if (!pt) return;
+    if (!polygonState.center) {
+      polygonState.center = pt;
+      drawingStart = pt;
+      cmdline.setLabel('[正多角形] 半径を入力 または点指定:');
+      return;
+    }
+    const r = Math.hypot(pt.x - polygonState.center.x, pt.y - polygonState.center.y);
+    if (r <= 0) return;
+    const id = `shape_${crypto.randomUUID()}`;
+    shapes.push(assignCurrentLayer({ id, type: 'polygon', cx: polygonState.center.x, cy: polygonState.center.y, r, sides: polygonState.sides, rotation: 0, inscribed: polygonState.inscribed }));
+    selectedId = id;
+    polygonState.center = null;
+    drawingStart = null;
+    previewShape = null;
+    saveHistory();
+    redraw();
+  } else if (tool === Tool.DONUT) {
+    const vals = str.split(',').map((v) => parseFloat(v.trim())).filter((v) => Number.isFinite(v));
+    if (vals.length === 2) {
+      donutState.innerDiameter = Math.max(0, vals[0]);
+      donutState.outerDiameter = Math.max(vals[0], vals[1]);
+      cmdline.addHistory(`DONUT 内径:${donutState.innerDiameter} 外径:${donutState.outerDiameter}`, '#8aa8c0');
+      return;
+    }
+    const pt = handleCoordInput(str, null, null);
+    if (!pt) return;
+    const id = `shape_${crypto.randomUUID()}`;
+    shapes.push(assignCurrentLayer({ id, type: 'donut', cx: pt.x, cy: pt.y, innerR: donutState.innerDiameter / 2, outerR: donutState.outerDiameter / 2 }));
+    selectedId = id;
+    saveHistory();
+    redraw();
+  } else if (tool === Tool.XLINE || tool === Tool.RAY) {
+    const pt = handleCoordInput(str, null, null);
+    if (!pt) return;
+    if (!xlineState.base) { xlineState.base = pt; return; }
+    const angle = Math.atan2(pt.y - xlineState.base.y, pt.x - xlineState.base.x) * 180 / Math.PI;
+    const id = `shape_${crypto.randomUUID()}`;
+    shapes.push(assignCurrentLayer(tool === Tool.XLINE
+      ? { id, type: 'xline', x: xlineState.base.x, y: xlineState.base.y, angle }
+      : { id, type: 'ray', x1: xlineState.base.x, y1: xlineState.base.y, angle }));
+    selectedId = id;
+    xlineState.base = null;
+    previewShape = null;
+    saveHistory();
+    redraw();
   } else if (tool === Tool.BREAK) {
     cmdline.setLabel('[ブレーク] 切断する線をクリック:');
     statusbar.setCustomGuide('切断する線を選択');
@@ -2147,9 +2332,10 @@ stage.on('mousemove', () => {
     || (moveState?.base) || (copyState?.base) || (scaleState?.base) || (arrayState?.base);
   if (orthoMode && orthoRef) mm = applyOrtho(orthoRef, mm);
 
-  if (pointer && ((tool === Tool.LINE || tool === Tool.RECT || tool === Tool.CIRCLE) && drawingStart
-    || (tool === Tool.ELLIPSE && ellipseState.center)) ) {
-    const from = tool === Tool.ELLIPSE ? ellipseState.center : drawingStart;
+  if (pointer && (((tool === Tool.LINE || tool === Tool.RECT || tool === Tool.CIRCLE || tool === Tool.POLYGON || tool === Tool.DONUT) && drawingStart)
+    || (tool === Tool.ELLIPSE && ellipseState.center)
+    || ((tool === Tool.XLINE || tool === Tool.RAY) && xlineState.base))) {
+    const from = tool === Tool.ELLIPSE ? ellipseState.center : ((tool === Tool.XLINE || tool === Tool.RAY) ? xlineState.base : drawingStart);
     dynInput.update(pointer.x, pointer.y, from, mm);
   } else {
     dynInput.hide();
@@ -2165,6 +2351,12 @@ stage.on('mousemove', () => {
     arcState,
     ellipseState,
     arrayState,
+    splinePoints,
+    polygonState,
+    revcloudPoints,
+    wipeoutPoints,
+    donutState,
+    xlineState,
     normalizeRect,
     arcFromThreePoints,
     cloneWithOffset,
@@ -2349,6 +2541,98 @@ stage.on('mousedown', (event) => {
       finishPolyline(true); return;
     }
     polylinePoints.push(mm);
+    redraw();
+    return;
+  }
+
+  if (tool === Tool.SPLINE) {
+    splinePoints.push(mm);
+    statusbar.setCustomGuide('スプライン: 点を追加 [Enter/右クリックで確定]');
+    redraw();
+    return;
+  }
+
+  if (tool === Tool.POLYGON) {
+    if (!polygonState.center) {
+      polygonState.center = mm;
+      drawingStart = mm;
+      statusbar.setCustomGuide('正多角形: 半径点をクリック');
+      return;
+    }
+    const r = Math.hypot(mm.x - polygonState.center.x, mm.y - polygonState.center.y);
+    if (r > 0) {
+      const id = `shape_${crypto.randomUUID()}`;
+      shapes.push(assignCurrentLayer({ id, type: 'polygon', cx: polygonState.center.x, cy: polygonState.center.y, r, sides: polygonState.sides, rotation: 0, inscribed: polygonState.inscribed }));
+      selectedId = id;
+      saveHistory();
+    }
+    polygonState.center = null;
+    drawingStart = null;
+    previewShape = null;
+    redraw();
+    return;
+  }
+
+  if (tool === Tool.REVCLOUD) {
+    if (!revcloudPoints.length) {
+      revcloudPoints.push(mm);
+      return;
+    }
+    if (revcloudPoints.length > 2 && Math.hypot(mm.x - revcloudPoints[0].x, mm.y - revcloudPoints[0].y) < 8 / viewport.scale) {
+      shapes.push(assignCurrentLayer({ id: `shape_${crypto.randomUUID()}`, type: 'revcloud', points: [...revcloudPoints], arcLength: 15 }));
+      revcloudPoints = [];
+      previewShape = null;
+      saveHistory();
+      redraw();
+      return;
+    }
+    revcloudPoints.push(mm);
+    redraw();
+    return;
+  }
+
+  if (tool === Tool.WIPEOUT) {
+    wipeoutPoints.push(mm);
+    redraw();
+    return;
+  }
+
+  if (tool === Tool.DONUT) {
+    const id = `shape_${crypto.randomUUID()}`;
+    shapes.push(assignCurrentLayer({ id, type: 'donut', cx: mm.x, cy: mm.y, innerR: donutState.innerDiameter / 2, outerR: donutState.outerDiameter / 2 }));
+    selectedId = id;
+    saveHistory();
+    redraw();
+    return;
+  }
+
+  if (tool === Tool.XLINE || tool === Tool.RAY) {
+    if (!xlineState.base) {
+      xlineState.base = mm;
+      statusbar.setCustomGuide(tool === Tool.XLINE ? '構築線: 方向点をクリック' : '放射線: 方向点をクリック');
+      return;
+    }
+    const angle = Math.atan2(mm.y - xlineState.base.y, mm.x - xlineState.base.x) * 180 / Math.PI;
+    const id = `shape_${crypto.randomUUID()}`;
+    shapes.push(assignCurrentLayer(tool === Tool.XLINE
+      ? { id, type: 'xline', x: xlineState.base.x, y: xlineState.base.y, angle }
+      : { id, type: 'ray', x1: xlineState.base.x, y1: xlineState.base.y, angle }));
+    selectedId = id;
+    xlineState.base = null;
+    previewShape = null;
+    saveHistory();
+    redraw();
+    return;
+  }
+
+  if (tool === Tool.DIVIDE || tool === Tool.MEASURE) {
+    const hit = pickShape(mm);
+    const generated = createDivisionPoints(hit, tool === Tool.DIVIDE);
+    if (!generated.length) return;
+    for (const pt of generated) {
+      shapes.push(assignCurrentLayer({ id: `shape_${crypto.randomUUID()}`, type: 'point', x: pt.x, y: pt.y }));
+    }
+    saveHistory();
     redraw();
     return;
   }
@@ -2933,6 +3217,18 @@ stage.on('contextmenu', (event) => {
   const commandRunning = tool !== Tool.SELECT;
   if (rightClickMode === 'autocad_like' && commandRunning) {
     if (tool === Tool.POLYLINE) { finishPolyline(false); return; }
+    if (tool === Tool.SPLINE && splinePoints.length > 1) {
+      shapes.push(assignCurrentLayer({ id: `shape_${crypto.randomUUID()}`, type: 'spline', points: [...splinePoints], closed: false }));
+      splinePoints = []; previewShape = null; saveHistory(); redraw(); return;
+    }
+    if (tool === Tool.REVCLOUD && revcloudPoints.length > 2) {
+      shapes.push(assignCurrentLayer({ id: `shape_${crypto.randomUUID()}`, type: 'revcloud', points: [...revcloudPoints], arcLength: 15 }));
+      revcloudPoints = []; previewShape = null; saveHistory(); redraw(); return;
+    }
+    if (tool === Tool.WIPEOUT && wipeoutPoints.length > 2) {
+      shapes.push(assignCurrentLayer({ id: `shape_${crypto.randomUUID()}`, type: 'wipeout', points: [...wipeoutPoints] }));
+      wipeoutPoints = []; previewShape = null; saveHistory(); redraw(); return;
+    }
     if (tool === Tool.LINE || tool === Tool.ARC || tool === Tool.ELLIPSE) {
       drawingStart = null;
       arcState = { p1: null, p2: null };
@@ -2960,7 +3256,19 @@ stage.on('contextmenu', (event) => {
 
   // 互換モード: 旧来の右クリックキャンセル
   if (tool === Tool.POLYLINE) { finishPolyline(false); return; }
-  if (tool === Tool.LINE || tool === Tool.ARC || tool === Tool.ELLIPSE) {
+  if (tool === Tool.SPLINE && splinePoints.length > 1) {
+    shapes.push(assignCurrentLayer({ id: `shape_${crypto.randomUUID()}`, type: 'spline', points: [...splinePoints], closed: false }));
+    splinePoints = []; previewShape = null; saveHistory(); redraw(); return;
+  }
+  if (tool === Tool.REVCLOUD && revcloudPoints.length > 2) {
+    shapes.push(assignCurrentLayer({ id: `shape_${crypto.randomUUID()}`, type: 'revcloud', points: [...revcloudPoints], arcLength: 15 }));
+    revcloudPoints = []; previewShape = null; saveHistory(); redraw(); return;
+  }
+  if (tool === Tool.WIPEOUT && wipeoutPoints.length > 2) {
+    shapes.push(assignCurrentLayer({ id: `shape_${crypto.randomUUID()}`, type: 'wipeout', points: [...wipeoutPoints] }));
+    wipeoutPoints = []; previewShape = null; saveHistory(); redraw(); return;
+  }
+  if (tool === Tool.LINE || tool === Tool.ARC || tool === Tool.ELLIPSE || tool === Tool.XLINE || tool === Tool.RAY) {
     drawingStart = null; arcState = { p1: null, p2: null }; previewShape = null;
     changeTool(Tool.SELECT); return;
   }
@@ -3128,6 +3436,30 @@ document.addEventListener('keydown', (event) => {
   // Enter（ポリライン確定 / トリムフェーズ切替）
   if (key === 'Enter') {
     if (tool === Tool.POLYLINE) { finishPolyline(false); return; }
+    if (tool === Tool.SPLINE && splinePoints.length > 1) {
+      shapes.push(assignCurrentLayer({ id: `shape_${crypto.randomUUID()}`, type: 'spline', points: [...splinePoints], closed: false }));
+      splinePoints = [];
+      previewShape = null;
+      saveHistory();
+      redraw();
+      return;
+    }
+    if (tool === Tool.REVCLOUD && revcloudPoints.length > 2) {
+      shapes.push(assignCurrentLayer({ id: `shape_${crypto.randomUUID()}`, type: 'revcloud', points: [...revcloudPoints], arcLength: 15 }));
+      revcloudPoints = [];
+      previewShape = null;
+      saveHistory();
+      redraw();
+      return;
+    }
+    if (tool === Tool.WIPEOUT && wipeoutPoints.length > 2) {
+      shapes.push(assignCurrentLayer({ id: `shape_${crypto.randomUUID()}`, type: 'wipeout', points: [...wipeoutPoints] }));
+      wipeoutPoints = [];
+      previewShape = null;
+      saveHistory();
+      redraw();
+      return;
+    }
     if (tool === Tool.TRIM && trimState.phase === 0) {
       trimState.phase = 1;
       selectedIds.clear();
@@ -3149,6 +3481,14 @@ document.addEventListener('keydown', (event) => {
 
   // C キー（ポリライン閉じる）
   if (lKey === 'c' && tool === Tool.POLYLINE) { finishPolyline(true); return; }
+  if (lKey === 'c' && tool === Tool.REVCLOUD && revcloudPoints.length > 2) {
+    shapes.push(assignCurrentLayer({ id: `shape_${crypto.randomUUID()}`, type: 'revcloud', points: [...revcloudPoints], arcLength: 15 }));
+    revcloudPoints = [];
+    previewShape = null;
+    saveHistory();
+    redraw();
+    return;
+  }
 
   // 2文字ショートカット（AutoCAD風）
   const chord = `${document._lastKey || ''}${lKey}`;
@@ -3392,6 +3732,19 @@ function shapeTouchesBbox(s, x0, y0, x1, y1) {
     const clampedY = Math.max(y0, Math.min(y1, s.cy));
     return Math.hypot(s.cx - clampedX, s.cy - clampedY) <= s.r;
   }
+  if (s.type === 'polygon' || s.type === 'donut') {
+    const r = s.type === 'polygon' ? s.r : s.outerR;
+    const clampedX = Math.max(x0, Math.min(x1, s.cx));
+    const clampedY = Math.max(y0, Math.min(y1, s.cy));
+    return Math.hypot(s.cx - clampedX, s.cy - clampedY) <= r;
+  }
+  if (s.type === 'xline' || s.type === 'ray') {
+    const p0 = { x: s.x ?? s.x1, y: s.y ?? s.y1 };
+    return p0.x >= x0 && p0.x <= x1 && p0.y >= y0 && p0.y <= y1;
+  }
+  if ((s.type === 'spline' || s.type === 'revcloud' || s.type === 'wipeout') && Array.isArray(s.points)) {
+    return s.points.some((pt) => pt.x >= x0 && pt.x <= x1 && pt.y >= y0 && pt.y <= y1);
+  }
   if (s.type === 'text' || s.type === 'point') {
     return s.x >= x0 && s.x <= x1 && s.y >= y0 && s.y <= y1;
   }
@@ -3454,6 +3807,20 @@ function isShapeInBox(s, sx0, sy0, sx1, sy1) {
   }
   if (s.type === 'circle' || s.type === 'arc') {
     return x0 <= s.cx - s.r && s.cx + s.r <= x1 && y0 <= s.cy - s.r && s.cy + s.r <= y1;
+  }
+  if (s.type === 'polygon') {
+    return x0 <= s.cx - s.r && s.cx + s.r <= x1 && y0 <= s.cy - s.r && s.cy + s.r <= y1;
+  }
+  if (s.type === 'donut') {
+    return x0 <= s.cx - s.outerR && s.cx + s.outerR <= x1 && y0 <= s.cy - s.outerR && s.cy + s.outerR <= y1;
+  }
+  if (s.type === 'xline' || s.type === 'ray') {
+    const px = s.x ?? s.x1;
+    const py = s.y ?? s.y1;
+    return x0 <= px && px <= x1 && y0 <= py && py <= y1;
+  }
+  if ((s.type === 'spline' || s.type === 'revcloud' || s.type === 'wipeout') && Array.isArray(s.points)) {
+    return s.points.every((pt) => x0 <= pt.x && pt.x <= x1 && y0 <= pt.y && pt.y <= y1);
   }
   if (s.type === 'text' || s.type === 'point') {
     return x0 <= s.x && s.x <= x1 && y0 <= s.y && s.y <= y1;
@@ -3573,4 +3940,66 @@ function pointToLineParam(line, point) {
 
 function pointOnLineByT(line, t) {
   return { x: line.x1 + (line.x2 - line.x1) * t, y: line.y1 + (line.y2 - line.y1) * t };
+}
+
+function getLinearSample(shape, t) {
+  if (!shape || t < 0 || t > 1) return null;
+  if (shape.type === 'line') return pointOnLineByT(shape, t);
+  if (shape.type === 'circle') {
+    const a = t * Math.PI * 2;
+    return { x: shape.cx + shape.r * Math.cos(a), y: shape.cy + shape.r * Math.sin(a) };
+  }
+  if (shape.type === 'arc') {
+    const start = shape.startAngle || 0;
+    const sweep = ((shape.endAngle || 0) - start + 360) % 360;
+    const a = (start + sweep * t) * Math.PI / 180;
+    return { x: shape.cx + shape.r * Math.cos(a), y: shape.cy + shape.r * Math.sin(a) };
+  }
+  if (shape.type === 'polyline_preview' && shape.points?.length > 1) {
+    const idx = Math.min(shape.points.length - 2, Math.floor(t * (shape.points.length - 1)));
+    const local = (t * (shape.points.length - 1)) - idx;
+    return {
+      x: shape.points[idx].x + (shape.points[idx + 1].x - shape.points[idx].x) * local,
+      y: shape.points[idx].y + (shape.points[idx + 1].y - shape.points[idx].y) * local,
+    };
+  }
+  return null;
+}
+
+function shapeLength(shape) {
+  if (!shape) return 0;
+  if (shape.type === 'line') return Math.hypot(shape.x2 - shape.x1, shape.y2 - shape.y1);
+  if (shape.type === 'circle') return 2 * Math.PI * shape.r;
+  if (shape.type === 'arc') {
+    const sweep = ((shape.endAngle || 0) - (shape.startAngle || 0) + 360) % 360;
+    return (Math.PI * 2 * shape.r) * (sweep / 360);
+  }
+  return 0;
+}
+
+function createDivisionPoints(shape, isDivide = true) {
+  const len = shapeLength(shape);
+  if (!shape || len <= 0) return [];
+
+  if (isDivide) {
+    const raw = window.prompt('分割数を入力', '5');
+    const count = parseInt(raw || '', 10);
+    if (!Number.isFinite(count) || count < 2) return [];
+    const points = [];
+    for (let i = 1; i < count; i += 1) {
+      const pt = getLinearSample(shape, i / count);
+      if (pt) points.push(pt);
+    }
+    return points;
+  }
+
+  const raw = window.prompt('間隔(mm)を入力', '100');
+  const step = parseFloat(raw || '');
+  if (!Number.isFinite(step) || step <= 0) return [];
+  const points = [];
+  for (let d = step; d < len - 1e-6; d += step) {
+    const pt = getLinearSample(shape, d / len);
+    if (pt) points.push(pt);
+  }
+  return points;
 }

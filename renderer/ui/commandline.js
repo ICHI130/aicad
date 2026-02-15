@@ -16,6 +16,24 @@ const COMMAND_MAP = {
   'a':    'arc',
   'arc':  'arc',
   'pl':   'polyline',
+  'spl':  'spline',
+  'spline': 'spline',
+  'pol':  'polygon',
+  'polygon': 'polygon',
+  'rvc':  'revcloud',
+  'revcloud': 'revcloud',
+  'wi':   'wipeout',
+  'wipeout': 'wipeout',
+  'do':   'donut',
+  'donut': 'donut',
+  'xl':   'xline',
+  'xline': 'xline',
+  'ray':  'ray',
+  'div':  'divide',
+  'divide': 'divide',
+  'me':   'measure',
+  'measure': 'measure',
+  'gd':   'hatch',
   'pline': 'polyline',
   'polyline': 'polyline',
   'o':    'offset',
@@ -84,6 +102,15 @@ const TOOL_LABELS = {
   ellipse:  '楕円',
   arc:      '円弧',
   polyline: 'ポリライン',
+  spline:   'スプライン',
+  polygon:  '正多角形',
+  revcloud: '雲マーク',
+  wipeout:  'ワイプアウト',
+  donut:    'ドーナツ',
+  xline:    '構築線',
+  ray:      '放射線',
+  divide:   'ディバイダ',
+  measure:  '計測',
   offset:   'オフセット',
   text:     '文字',
   move:     '移動',
@@ -114,6 +141,15 @@ const TOOL_GUIDES = {
   ellipse:  { 0: '中心点をクリック', 1: 'X軸端点をクリック', 2: 'Y軸端点をクリック' },
   arc:      { 0: '始点をクリック', 1: '中間点をクリック', 2: '終点をクリック' },
   polyline: { 0: '始点をクリック', 1: '次の点をクリック [Enter:終了] [C:閉じる] [Backspace:1点戻る] [右クリック:終了]' },
+  spline:   { 0: '制御点をクリック', 1: '次の制御点をクリック [Enter:確定]' },
+  polygon:  { 0: '辺数を入力 [3-32] または中心をクリック', 1: '半径点をクリック' },
+  revcloud: { 0: '点をクリックして雲形を作成', 1: '次点をクリック [Enter/C:確定]' },
+  wipeout:  { 0: '点をクリックして境界作成', 1: '次点をクリック [Enter:確定]' },
+  donut:    { 0: '中心をクリック [内径,外径 の数値入力可]' },
+  xline:    { 0: '通過点をクリック', 1: '方向点をクリック' },
+  ray:      { 0: '始点をクリック', 1: '方向点をクリック' },
+  divide:   { 0: '対象線/円をクリックして等分点作成' },
+  measure:  { 0: '対象線/円をクリックして等間隔点作成' },
   offset:   { 0: 'オフセット距離を入力 [Enter]', 1: '元の線をクリック', 2: 'オフセット方向をクリック [Esc:終了]' },
   text:     { 0: '文字の挿入点をクリック', 1: '文字を入力 [Enter:確定]' },
   move:     { 0: '基点をクリック', 1: '目標点をクリック または @dx,dy を入力' },
@@ -146,6 +182,10 @@ const HELP_TEXT = `コマンド一覧:
   F    → フィレット
   AR   → 配列複写             H    → ハッチ
   DIM  → 寸法                 ML   → 引出線
+  SPL  → スプライン           POL  → 正多角形
+  RVC  → 雲マーク             WI   → ワイプアウト
+  DO   → ドーナツ             XL   → 構築線
+  DIV  → ディバイダ           ME   → 計測
   U    → 元に戻す
   AUDIT→ 監査ログ              CMP  → 直前差分
   VLIST→ 保存ビュー一覧        VSAVE 名前 → 現在ビュー保存
@@ -223,6 +263,10 @@ export function initCommandLine({ onToolChange, onCoordInput, onSpecialCommand, 
       diameter: 'diameter',
       l: 'linear',
       linear: 'linear',
+    },
+    polygon: {
+      i: 'inscribed',
+      c: 'circumscribed',
     },
   };
 

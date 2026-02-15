@@ -11,6 +11,15 @@ export const Tool = {
   ELLIPSE: 'ellipse',
   ARC: 'arc',
   POLYLINE: 'polyline',
+  SPLINE: 'spline',
+  POLYGON: 'polygon',
+  REVCLOUD: 'revcloud',
+  WIPEOUT: 'wipeout',
+  DONUT: 'donut',
+  XLINE: 'xline',
+  RAY: 'ray',
+  DIVIDE: 'divide',
+  MEASURE: 'measure',
   DIM: 'dim',
   MOVE: 'move',
   COPY: 'copy',
@@ -145,6 +154,111 @@ export function buildShapeNode(shape, viewport, options = {}) {
     });
   }
 
+  if (shape.type === 'spline') {
+    const pts = [];
+    for (const pt of shape.points || []) {
+      const p = mmToScreen(pt, viewport);
+      pts.push(p.x, p.y);
+    }
+    return new Konva.Line({
+      points: pts,
+      tension: 0.5,
+      closed: !!shape.closed,
+      stroke: color,
+      strokeWidth: sw,
+      fill: 'transparent',
+      dash,
+      id: shape.id,
+      listening: !isPreview,
+    });
+  }
+
+  if (shape.type === 'polygon') {
+    const c = mmToScreen({ x: shape.cx, y: shape.cy }, viewport);
+    const rPx = Math.max(0, shape.r * viewport.scale);
+    const sides = Math.max(3, Math.min(32, Math.round(shape.sides || 6)));
+    const pts = [];
+    for (let i = 0; i < sides; i += 1) {
+      const a = (Math.PI * 2 * i / sides) + (shape.rotation || 0) * Math.PI / 180;
+      pts.push(c.x + rPx * Math.cos(a), c.y + rPx * Math.sin(a));
+    }
+    return new Konva.Line({
+      points: pts,
+      closed: true,
+      stroke: color,
+      strokeWidth: sw,
+      fill: 'transparent',
+      dash,
+      id: shape.id,
+      listening: !isPreview,
+    });
+  }
+
+  if (shape.type === 'revcloud') {
+    const pts = [];
+    for (const pt of shape.points || []) {
+      const p = mmToScreen(pt, viewport);
+      pts.push(p.x, p.y);
+    }
+    return new Konva.Line({
+      points: pts,
+      closed: true,
+      tension: 0.45,
+      stroke: color,
+      strokeWidth: sw,
+      fill: 'transparent',
+      id: shape.id,
+      listening: !isPreview,
+    });
+  }
+
+  if (shape.type === 'wipeout') {
+    const pts = [];
+    for (const pt of shape.points || []) {
+      const p = mmToScreen(pt, viewport);
+      pts.push(p.x, p.y);
+    }
+    return new Konva.Line({
+      points: pts,
+      closed: true,
+      fill: '#1a1a1a',
+      stroke: '#1a1a1a',
+      strokeWidth: 1,
+      id: shape.id,
+      listening: !isPreview,
+    });
+  }
+
+  if (shape.type === 'donut') {
+    const c = mmToScreen({ x: shape.cx, y: shape.cy }, viewport);
+    const r1 = Math.max(0, (shape.innerR || 0) * viewport.scale);
+    const r2 = Math.max(0, (shape.outerR || 0) * viewport.scale);
+    const group = new Konva.Group({ id: shape.id, listening: !isPreview });
+    group.add(new Konva.Circle({ x: c.x, y: c.y, radius: r2, fill: color, stroke: 'transparent' }));
+    if (r1 > 0) group.add(new Konva.Circle({ x: c.x, y: c.y, radius: r1, fill: '#1a1a1a', stroke: 'transparent' }));
+    return group;
+  }
+
+  if (shape.type === 'xline' || shape.type === 'ray') {
+    const p = mmToScreen({ x: shape.x ?? shape.x1, y: shape.y ?? shape.y1 }, viewport);
+    const angle = (shape.angle || 0) * Math.PI / 180;
+    const BIG = 100000;
+    const pts = shape.type === 'xline'
+      ? [
+        p.x - BIG * Math.cos(angle), p.y - BIG * Math.sin(angle),
+        p.x + BIG * Math.cos(angle), p.y + BIG * Math.sin(angle),
+      ]
+      : [p.x, p.y, p.x + BIG * Math.cos(angle), p.y + BIG * Math.sin(angle)];
+    return new Konva.Line({
+      points: pts,
+      stroke: color,
+      strokeWidth: sw,
+      dash: [4, 4],
+      id: shape.id,
+      listening: !isPreview,
+    });
+  }
+
   if (shape.type === 'dim' && shape.dimType === 'radius') {
     const style = getDimStyle();
     const group = new Konva.Group({ id: shape.id, listening: !isPreview });
@@ -231,6 +345,47 @@ export function buildShapeNode(shape, viewport, options = {}) {
 
 
   if (shape.type === 'hatch') {
+    if (shape.fillType === 'gradient' && shape.gradient) {
+      const group = new Konva.Group({ id: shape.id, listening: !isPreview });
+      const g = shape.gradient;
+      const angleRad = ((g.angle || 0) * Math.PI) / 180;
+      const x1 = 0;
+      const y1 = 0;
+      const x2 = Math.cos(angleRad);
+      const y2 = Math.sin(angleRad);
+
+      if (shape.hatchKind === 'rect') {
+        const p = mmToScreen({ x: shape.x, y: shape.y }, viewport);
+        const w = shape.w * viewport.scale;
+        const h = shape.h * viewport.scale;
+        group.add(new Konva.Rect({
+          x: p.x,
+          y: p.y,
+          width: w,
+          height: h,
+          fillLinearGradientStartPoint: { x: p.x + x1 * w, y: p.y + y1 * h },
+          fillLinearGradientEndPoint: { x: p.x + x2 * w, y: p.y + y2 * h },
+          fillLinearGradientColorStops: [0, g.color1 || '#ffffff', 1, g.color2 || '#4da6ff'],
+          stroke: 'transparent',
+        }));
+      } else if (shape.hatchKind === 'circle') {
+        const c = mmToScreen({ x: shape.cx, y: shape.cy }, viewport);
+        const r = shape.r * viewport.scale;
+        group.add(new Konva.Circle({
+          x: c.x,
+          y: c.y,
+          radius: r,
+          fillRadialGradientStartPoint: { x: 0, y: 0 },
+          fillRadialGradientEndPoint: { x: 0, y: 0 },
+          fillRadialGradientStartRadius: 0,
+          fillRadialGradientEndRadius: r,
+          fillRadialGradientColorStops: [0, g.color1 || '#ffffff', 1, g.color2 || '#4da6ff'],
+          stroke: 'transparent',
+        }));
+      }
+      return group;
+    }
+
     const group = new Konva.Group({ id: shape.id, listening: !isPreview });
     const spacing = Math.max(4, (shape.spacing || 120) * viewport.scale);
     const colorHatch = isPreview ? COLOR_PREVIEW : (isSelected ? COLOR_SELECT : '#7fd68a');
@@ -307,11 +462,12 @@ export function buildShapeNode(shape, viewport, options = {}) {
 
   if (shape.type === 'point') {
     const p = mmToScreen({ x: shape.x, y: shape.y }, viewport);
-    const size = 3;
-    return new Konva.Line({
-      points: [p.x - size, p.y, p.x + size, p.y],
-      stroke: color,
-      strokeWidth: sw,
+    return new Konva.Circle({
+      x: p.x,
+      y: p.y,
+      radius: 3,
+      fill: color,
+      stroke: 'transparent',
       id: shape.id,
       listening: !isPreview,
     });
