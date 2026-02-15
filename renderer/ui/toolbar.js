@@ -30,6 +30,8 @@ const TOOL_DEFS = [
   { id: Tool.DIVIDE,   icon: '⋮', labelKey: 'divide',   key: 'DIV' },
   { id: Tool.MEASURE,  icon: '∷', labelKey: 'measure',  key: 'ME' },
   { id: Tool.TEXT,     icon: 'Ａ', labelKey: 'text',     key: 'T' },
+  { id: Tool.MTEXT,    icon: '🅣', labelKey: 'mtext',    key: 'MT' },
+  { id: Tool.TABLE,    icon: '▤', labelKey: 'table',    key: 'TB' },
   // グループ: 修正
   { groupKey: 'toolbar_modify' },
   { id: Tool.MOVE,     icon: '↔', labelKey: 'move',   key: 'M' },

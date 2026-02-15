@@ -40,8 +40,18 @@ const COMMAND_MAP = {
   'offset': 'offset',
   't':    'text',
   'text': 'text',
-  'mt':   'text',
-  'mtext': 'text',
+  'mt':   'mtext',
+  'mtext': 'mtext',
+  'tb':   'table',
+  'table': 'table',
+  'g':    'group',
+  'group': 'group',
+  'ug':   'ungroup',
+  'ungroup': 'ungroup',
+  'dr':   'draworder',
+  'draworder': 'draworder',
+  'qs':   'qselect',
+  'qselect': 'qselect',
   'm':    'move',
   'move': 'move',
   'co':   'copy',
@@ -133,6 +143,8 @@ const TOOL_LABELS = {
   erase:    '削除',
   dim:      '寸法',
   mleader:  '引出線',
+  mtext:    'マルチテキスト',
+  table:    '表',
 };
 
 const TOOL_GUIDES = {
@@ -169,6 +181,8 @@ const TOOL_GUIDES = {
   hatch:    { 0: '境界(矩形/円)をクリックしてハッチ作成' },
   dim:      { 0: '寸法の始点をクリック', 1: '寸法の終点をクリック', 2: '寸法線の位置をクリック' },
   mleader:  { 0: '矢印先端をクリック', 1: '引出線の折点をクリック', 2: '注記位置をクリック' },
+  mtext:    { 0: '挿入点をクリックしてMTEXTを配置' },
+  table:    { 0: '挿入点をクリックしてTABLEを配置' },
 };
 
 const HELP_TEXT = `コマンド一覧:
@@ -188,6 +202,8 @@ const HELP_TEXT = `コマンド一覧:
   RVC  → 雲マーク             WI   → ワイプアウト
   DO   → ドーナツ             XL   → 構築線
   DIV  → ディバイダ           ME   → 計測
+  MT   → マルチテキスト       TB   → 表
+  G/UG → グループ化/解除      QS   → クイック選択
   U    → 元に戻す
   AUDIT→ 監査ログ              CMP  → 直前差分
   VLIST→ 保存ビュー一覧        VSAVE 名前 → 現在ビュー保存
@@ -347,6 +363,11 @@ export function initCommandLine({ onToolChange, onCoordInput, onSpecialCommand, 
     if (toolId === 'print') {
       addHistory('印刷(PDF)', '#8aa8c0');
       onSpecialCommand?.('print');
+      return;
+    }
+    if (toolId === 'group' || toolId === 'ungroup' || toolId === 'draworder' || toolId === 'qselect') {
+      addHistory(`コマンド: ${raw.toUpperCase()}`, '#8aa8c0');
+      onSpecialCommand?.(toolId);
       return;
     }
 
