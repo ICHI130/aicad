@@ -22,6 +22,8 @@ const TOOL_DEFS = [
   { id: Tool.ARC,      icon: '◜', labelKey: 'arc',      key: 'A' },
   { id: Tool.POLYLINE, icon: '〜', labelKey: 'polyline', key: 'PL' },
   { id: Tool.TEXT,     icon: 'Ａ', labelKey: 'text',     key: 'T' },
+  { id: Tool.MTEXT,    icon: '🅣', labelKey: 'mtext',    key: 'MT' },
+  { id: Tool.TABLE,    icon: '▤', labelKey: 'table',    key: 'TB' },
   // グループ: 修正
   { groupKey: 'toolbar_modify' },
   { id: Tool.MOVE,     icon: '↔', labelKey: 'move',   key: 'M' },

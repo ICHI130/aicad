@@ -174,6 +174,9 @@ let panStart = null;
 let dragState = null;
 let polylinePoints = [];
 let clipboard = null;
+let groups = {};
+let mtextStyle = { bold: false, italic: false };
+let tableConfig = { cols: 4, rows: 3, colWidth: 30, rowHeight: 10 };
 let moveState = null;
 let copyState = null;
 let rotateState = null;
@@ -643,6 +646,12 @@ function changeTool(nextTool) {
   } else if (tool === Tool.HATCH) {
     cmdline.setLabel('[ハッチ] 境界(矩形/円)をクリック:');
     statusbar.setCustomGuide('境界をクリックしてハッチ作成');
+  } else if (tool === Tool.MTEXT) {
+    cmdline.setLabel('[MTEXT] 挿入点をクリック:');
+    statusbar.setCustomGuide('挿入点をクリックしてマルチテキスト編集');
+  } else if (tool === Tool.TABLE) {
+    cmdline.setLabel('[TABLE] 挿入点をクリック:');
+    statusbar.setCustomGuide('挿入点をクリックして表を配置');
   } else if (tool === Tool.JOIN) {
     runJoinCommand();
     changeTool(Tool.SELECT);
@@ -813,6 +822,22 @@ const cmdline = initCommandLine({
     else if (cmd === 'print') printCurrentViewAsPdf();
     else if (cmd === 'audit') showAuditTrail();
     else if (cmd === 'compare') showLastHistoryDiff();
+    else if (cmd === 'group') {
+      const ids = [...getSelectionIds()];
+      if (ids.length < 2) cmdline.addHistory('GROUP: 2つ以上選択してください', '#cc7777');
+      else {
+        createGroup(ids);
+        cmdline.addHistory(`GROUP: ${ids.length}個をグループ化`, '#8aa8c0');
+      }
+    } else if (cmd === 'ungroup') {
+      const count = ungroupSelected();
+      cmdline.addHistory(count ? `UNGROUP: ${count}個解除` : 'UNGROUP: 対象なし', count ? '#8aa8c0' : '#cc7777');
+    } else if (cmd === 'draworder') {
+      setDrawOrder('bring-front');
+      cmdline.addHistory('DRAWORDER: 最前面へ', '#8aa8c0');
+    } else if (cmd === 'qselect') {
+      openQSelectDialog();
+    }
   },
 });
 cmdline.setActiveTool(tool);
@@ -1048,6 +1073,19 @@ function pickShape(mmPoint) {
       if (mmPoint.x >= s.x - threshold && mmPoint.x <= s.x + approxW + threshold && mmPoint.y >= s.y - (s.height || 2.5) - threshold && mmPoint.y <= s.y + threshold) return s;
       continue;
     }
+    if (s.type === 'mtext') {
+      const height = Number(s.height) || 3.5;
+      const lines = Math.max(1, Array.isArray(s.content) ? s.content.length : 1);
+      const width = Number(s.width) || 100;
+      if (mmPoint.x >= s.x - threshold && mmPoint.x <= s.x + width + threshold && mmPoint.y >= s.y - threshold && mmPoint.y <= s.y + (height * lines * 1.4) + threshold) return s;
+      continue;
+    }
+    if (s.type === 'table') {
+      const w = (s.colWidths || []).reduce((a, b) => a + (Number(b) || 0), 0);
+      const h = (s.rowHeights || []).reduce((a, b) => a + (Number(b) || 0), 0);
+      if (mmPoint.x >= s.x - threshold && mmPoint.x <= s.x + w + threshold && mmPoint.y >= s.y - threshold && mmPoint.y <= s.y + h + threshold) return s;
+      continue;
+    }
     if (s.type === 'point') {
       if (Math.hypot(mmPoint.x - s.x, mmPoint.y - s.y) <= threshold * 2) return s;
       continue;
@@ -1082,6 +1120,95 @@ function getSelectedShapes() {
   const ids = getSelectionIds();
   if (!ids.size) return [];
   return shapes.filter((shape) => ids.has(shape.id));
+}
+
+function expandSelectionForGroup(shape) {
+  if (!shape?.groupId || !groups[shape.groupId]) return { selectedId: shape?.id || null, selectedIds: new Set() };
+  const memberIds = groups[shape.groupId].filter((id) => shapes.some((s) => s.id === id));
+  if (memberIds.length <= 1) return { selectedId: shape.id, selectedIds: new Set() };
+  return { selectedId: null, selectedIds: new Set(memberIds) };
+}
+
+function createGroup(shapeIds) {
+  if (!shapeIds?.length) return null;
+  const gid = `group_${Date.now()}`;
+  groups[gid] = [...shapeIds];
+  for (const id of shapeIds) {
+    const shape = shapes.find((s) => s.id === id);
+    if (shape) shape.groupId = gid;
+  }
+  saveHistory();
+  redraw();
+  return gid;
+}
+
+function ungroupSelected() {
+  const ids = getSelectionIds();
+  if (!ids.size) return 0;
+  const groupIds = new Set();
+  for (const id of ids) {
+    const shape = shapes.find((s) => s.id === id);
+    if (shape?.groupId) groupIds.add(shape.groupId);
+  }
+  let changed = 0;
+  for (const gid of groupIds) {
+    const members = groups[gid] || [];
+    for (const id of members) {
+      const shape = shapes.find((s) => s.id === id);
+      if (shape?.groupId === gid) {
+        delete shape.groupId;
+        changed += 1;
+      }
+    }
+    delete groups[gid];
+  }
+  if (changed) {
+    saveHistory();
+    redraw();
+  }
+  return changed;
+}
+
+function setDrawOrder(action) {
+  const ids = [...getSelectionIds()];
+  if (!ids.length) return;
+  if (action === 'bring-front') {
+    for (const id of ids) {
+      const idx = shapes.findIndex((s) => s.id === id);
+      if (idx >= 0) shapes.push(...shapes.splice(idx, 1));
+    }
+  } else if (action === 'send-back') {
+    for (let i = ids.length - 1; i >= 0; i -= 1) {
+      const idx = shapes.findIndex((s) => s.id === ids[i]);
+      if (idx >= 0) shapes.unshift(...shapes.splice(idx, 1));
+    }
+  } else if (action === 'bring-forward') {
+    for (let i = shapes.length - 2; i >= 0; i -= 1) {
+      if (ids.includes(shapes[i].id) && !ids.includes(shapes[i + 1].id)) {
+        [shapes[i], shapes[i + 1]] = [shapes[i + 1], shapes[i]];
+      }
+    }
+  } else if (action === 'send-backward') {
+    for (let i = 1; i < shapes.length; i += 1) {
+      if (ids.includes(shapes[i].id) && !ids.includes(shapes[i - 1].id)) {
+        [shapes[i - 1], shapes[i]] = [shapes[i], shapes[i - 1]];
+      }
+    }
+  }
+  saveHistory();
+  redraw();
+}
+
+function quickSelect(type, layerId) {
+  const hits = shapes.filter((shape) => (!type || shape.type === type) && (!layerId || getShapeLayerId(shape) === layerId));
+  selectedId = null;
+  selectedIds = new Set(hits.map((s) => s.id));
+  if (hits.length === 1) {
+    selectedId = hits[0].id;
+    selectedIds.clear();
+  }
+  redraw();
+  return hits.length;
 }
 
 function copySelectionToClipboard() {
@@ -1246,7 +1373,7 @@ function applyMove(shape, dx, dy) {
     shape.x3 += dx; shape.y3 += dy;
     return;
   }
-  if (shape.type === 'text' || shape.type === 'point') { shape.x += dx; shape.y += dy; return; }
+  if (shape.type === 'text' || shape.type === 'point' || shape.type === 'mtext' || shape.type === 'table') { shape.x += dx; shape.y += dy; return; }
   if (shape.type === 'hatch') {
     if (shape.hatchKind === 'circle') { shape.cx += dx; shape.cy += dy; }
     else { shape.x += dx; shape.y += dy; }
@@ -2021,6 +2148,159 @@ function startTextInput(mm) {
   });
 }
 
+
+function openMTextEditor(point, targetShape = null) {
+  const editor = document.getElementById('mtext-editor');
+  const contentEl = document.getElementById('mtext-content');
+  const heightEl = document.getElementById('mtext-height');
+  const boldBtn = document.getElementById('mtext-bold');
+  const italicBtn = document.getElementById('mtext-italic');
+  const okBtn = document.getElementById('mtext-ok');
+  const cancelBtn = document.getElementById('mtext-cancel');
+  if (!editor || !contentEl || !heightEl || !okBtn || !cancelBtn) return;
+
+  const screen = mmToScreen(point, viewport);
+  editor.style.left = `${screen.x}px`;
+  editor.style.top = `${screen.y}px`;
+  editor.style.display = 'block';
+
+  const lines = targetShape?.content || [{ text: '', bold: mtextStyle.bold, italic: mtextStyle.italic, height: Number(heightEl.value) || 3.5 }];
+  contentEl.value = lines.map((line) => line.text || '').join('
+');
+  heightEl.value = String(lines[0]?.height || 3.5);
+  mtextStyle.bold = !!lines[0]?.bold;
+  mtextStyle.italic = !!lines[0]?.italic;
+  boldBtn?.classList.toggle('active', mtextStyle.bold);
+  italicBtn?.classList.toggle('active', mtextStyle.italic);
+
+  const close = () => {
+    editor.style.display = 'none';
+    okBtn.onclick = null;
+    cancelBtn.onclick = null;
+  };
+
+  boldBtn.onclick = () => {
+    mtextStyle.bold = !mtextStyle.bold;
+    boldBtn.classList.toggle('active', mtextStyle.bold);
+  };
+  italicBtn.onclick = () => {
+    mtextStyle.italic = !mtextStyle.italic;
+    italicBtn.classList.toggle('active', mtextStyle.italic);
+  };
+
+  okBtn.onclick = () => {
+    const textLines = contentEl.value.split(/
+?
+/);
+    const baseHeight = Math.max(0.5, Number(heightEl.value) || 3.5);
+    const content = textLines.map((text) => ({ text, bold: mtextStyle.bold, italic: mtextStyle.italic, height: baseHeight }));
+    if (targetShape) {
+      targetShape.content = content;
+      targetShape.height = baseHeight;
+      targetShape.width = targetShape.width || 100;
+    } else {
+      shapes.push(assignCurrentLayer({
+        id: `shape_${crypto.randomUUID()}`,
+        type: 'mtext',
+        x: point.x,
+        y: point.y,
+        width: 100,
+        height: baseHeight,
+        content,
+      }));
+    }
+    saveHistory();
+    redraw();
+    close();
+    changeTool(Tool.SELECT);
+  };
+  cancelBtn.onclick = () => {
+    close();
+    changeTool(Tool.SELECT);
+  };
+}
+
+function openTableCellEditor(tableShape, clickPoint) {
+  const editor = document.getElementById('table-editor');
+  const input = document.getElementById('table-cell-input');
+  const okBtn = document.getElementById('table-ok');
+  const cancelBtn = document.getElementById('table-cancel');
+  if (!editor || !input || !okBtn || !cancelBtn || !tableShape) return;
+
+  const colWidths = tableShape.colWidths || [];
+  const rowHeights = tableShape.rowHeights || [];
+  let cx = tableShape.x;
+  let col = -1;
+  for (let i = 0; i < colWidths.length; i += 1) {
+    if (clickPoint.x >= cx && clickPoint.x <= cx + colWidths[i]) { col = i; break; }
+    cx += colWidths[i];
+  }
+  let cy = tableShape.y;
+  let row = -1;
+  for (let i = 0; i < rowHeights.length; i += 1) {
+    if (clickPoint.y >= cy && clickPoint.y <= cy + rowHeights[i]) { row = i; break; }
+    cy += rowHeights[i];
+  }
+  if (row < 0 || col < 0) return;
+
+  const screen = mmToScreen(clickPoint, viewport);
+  editor.style.left = `${screen.x}px`;
+  editor.style.top = `${screen.y}px`;
+  editor.style.display = 'block';
+
+  tableShape.cells = tableShape.cells || Array.from({ length: tableShape.rows }, () => Array.from({ length: tableShape.cols }, () => ''));
+  input.value = tableShape.cells[row]?.[col] || '';
+  input.focus();
+
+  const close = () => {
+    editor.style.display = 'none';
+    okBtn.onclick = null;
+    cancelBtn.onclick = null;
+  };
+
+  okBtn.onclick = () => {
+    tableShape.cells[row][col] = input.value;
+    saveHistory();
+    redraw();
+    close();
+  };
+  cancelBtn.onclick = close;
+}
+
+function openQSelectDialog() {
+  const dialog = document.getElementById('qselect-dialog');
+  const typeEl = document.getElementById('qs-type');
+  const layerEl = document.getElementById('qs-layer');
+  const applyBtn = document.getElementById('qs-apply');
+  const cancelBtn = document.getElementById('qs-cancel');
+  if (!dialog || !typeEl || !layerEl || !applyBtn || !cancelBtn) return;
+
+  layerEl.innerHTML = '<option value="">すべてのレイヤー</option>';
+  for (const layer of layers) {
+    const opt = document.createElement('option');
+    opt.value = layer.id;
+    opt.textContent = layer.name;
+    layerEl.appendChild(opt);
+  }
+
+  dialog.style.left = '160px';
+  dialog.style.top = '120px';
+  dialog.style.display = 'block';
+
+  const close = () => {
+    dialog.style.display = 'none';
+    applyBtn.onclick = null;
+    cancelBtn.onclick = null;
+  };
+
+  applyBtn.onclick = () => {
+    const count = quickSelect(typeEl.value, layerEl.value);
+    cmdline.addHistory(`QSELECT: ${count}件選択`, '#8aa8c0');
+    close();
+  };
+  cancelBtn.onclick = close;
+}
+
 // ──────────────────────────────────────────────
 // ポリライン完成
 // ──────────────────────────────────────────────
@@ -2246,10 +2526,11 @@ stage.on('mousedown', (event) => {
 
     const hit = pickShape(mm);
     if (hit) {
-      // 図形をクリック → 選択
-      selectedId = hit.id;
-      selectedIds.clear();
-      dragState = { id: hit.id, anchor: mm, original: shapeClone(hit) };
+      // 図形をクリック → 選択（グループ対応）
+      const expanded = expandSelectionForGroup(hit);
+      selectedId = expanded.selectedId;
+      selectedIds = expanded.selectedIds;
+      dragState = expanded.selectedId ? { id: hit.id, anchor: mm, original: shapeClone(hit) } : null;
     } else {
       // 空白クリック → 矩形選択開始
       selectedId = null;
@@ -2437,6 +2718,36 @@ stage.on('mousedown', (event) => {
 
   if (tool === Tool.TEXT) {
     startTextInput(mm);
+    return;
+  }
+
+  if (tool === Tool.MTEXT) {
+    openMTextEditor(mm);
+    return;
+  }
+
+  if (tool === Tool.TABLE) {
+    const cols = Math.max(1, Number(tableConfig.cols) || 4);
+    const rows = Math.max(1, Number(tableConfig.rows) || 3);
+    const colW = Math.max(1, Number(tableConfig.colWidth) || 30);
+    const rowH = Math.max(1, Number(tableConfig.rowHeight) || 10);
+    const shape = assignCurrentLayer({
+      id: `shape_${crypto.randomUUID()}`,
+      type: 'table',
+      x: mm.x,
+      y: mm.y,
+      cols,
+      rows,
+      colWidths: Array.from({ length: cols }, () => colW),
+      rowHeights: Array.from({ length: rows }, () => rowH),
+      cells: Array.from({ length: rows }, (_, r) => Array.from({ length: cols }, (_, c) => (r === 0 ? `列${c + 1}` : ''))),
+    });
+    shapes.push(shape);
+    selectedId = shape.id;
+    selectedIds.clear();
+    saveHistory();
+    redraw();
+    cmdline.addHistory('TABLEを配置しました（ダブルクリックでセル編集）', '#8aa8c0');
     return;
   }
 
@@ -2993,7 +3304,19 @@ stage.on('dblclick', () => {
   if (tool !== Tool.SELECT) return;
   const mm = pointerToMm();
   const hit = pickShape(mm);
-  if (!hit || hit.type !== 'text') return;
+  if (!hit) return;
+
+  if (hit.type === 'mtext') {
+    openMTextEditor({ x: hit.x, y: hit.y }, hit);
+    return;
+  }
+
+  if (hit.type === 'table') {
+    openTableCellEditor(hit, mm);
+    return;
+  }
+
+  if (hit.type !== 'text') return;
 
   const shape = hit;
   const screen = mmToScreen({ x: shape.x, y: shape.y }, viewport);
@@ -3168,6 +3491,10 @@ document.addEventListener('keydown', (event) => {
   if (chord === 'ar') { changeTool(Tool.ARRAY); document._lastKey = ''; return; }
   if (chord === 'di') { changeTool(Tool.DIM); document._lastKey = ''; return; }
   if (chord === 'ml') { changeTool(Tool.MLEADER); document._lastKey = ''; return; }
+  if (chord === 'mt') { changeTool(Tool.MTEXT); document._lastKey = ''; return; }
+  if (chord === 'tb') { changeTool(Tool.TABLE); document._lastKey = ''; return; }
+  if (chord === 'ug') { const count = ungroupSelected(); cmdline.addHistory(count ? `UNGROUP: ${count}個解除` : 'UNGROUP: 対象なし', count ? '#8aa8c0' : '#cc7777'); document._lastKey = ''; return; }
+  if (chord === 'qs') { openQSelectDialog(); document._lastKey = ''; return; }
   if (chord === 'co' && hasSelection) { changeTool(Tool.COPY); document._lastKey = ''; return; }
   if (chord === 'ro' && hasSelection) { changeTool(Tool.ROTATE); document._lastKey = ''; return; }
 
@@ -3199,6 +3526,11 @@ document.addEventListener('keydown', (event) => {
   if (lKey === 'a') { changeTool(Tool.ARC); return; }
   if (lKey === 'p') { changeTool(Tool.POLYLINE); return; }
   if (lKey === 'd') { changeTool(Tool.DIM); return; }
+  if (lKey === 'g' && event.shiftKey) {
+    const ids = [...getSelectionIds()];
+    if (ids.length >= 2) { createGroup(ids); cmdline.addHistory(`GROUP: ${ids.length}個をグループ化`, '#8aa8c0'); }
+    return;
+  }
   if (lKey === 'g') { changeTool(Tool.MLEADER); return; }
   if (lKey === 't') { changeTool(Tool.TEXT); return; }
   if (lKey === 'o') { changeTool(Tool.OFFSET); return; }
@@ -3392,8 +3724,13 @@ function shapeTouchesBbox(s, x0, y0, x1, y1) {
     const clampedY = Math.max(y0, Math.min(y1, s.cy));
     return Math.hypot(s.cx - clampedX, s.cy - clampedY) <= s.r;
   }
-  if (s.type === 'text' || s.type === 'point') {
+  if (s.type === 'text' || s.type === 'point' || s.type === 'mtext') {
     return s.x >= x0 && s.x <= x1 && s.y >= y0 && s.y <= y1;
+  }
+  if (s.type === 'table') {
+    const w = (s.colWidths || []).reduce((a, b) => a + (Number(b) || 0), 0);
+    const h = (s.rowHeights || []).reduce((a, b) => a + (Number(b) || 0), 0);
+    return !(s.x > x1 || s.x + w < x0 || s.y > y1 || s.y + h < y0);
   }
   if (s.type === 'mleader') {
     const inBox = (px, py) => px >= x0 && px <= x1 && py >= y0 && py <= y1;
@@ -3455,8 +3792,13 @@ function isShapeInBox(s, sx0, sy0, sx1, sy1) {
   if (s.type === 'circle' || s.type === 'arc') {
     return x0 <= s.cx - s.r && s.cx + s.r <= x1 && y0 <= s.cy - s.r && s.cy + s.r <= y1;
   }
-  if (s.type === 'text' || s.type === 'point') {
+  if (s.type === 'text' || s.type === 'point' || s.type === 'mtext') {
     return x0 <= s.x && s.x <= x1 && y0 <= s.y && s.y <= y1;
+  }
+  if (s.type === 'table') {
+    const w = (s.colWidths || []).reduce((a, b) => a + (Number(b) || 0), 0);
+    const h = (s.rowHeights || []).reduce((a, b) => a + (Number(b) || 0), 0);
+    return x0 <= s.x && s.x + w <= x1 && y0 <= s.y && s.y + h <= y1;
   }
   if (s.type === 'hatch') {
     if (s.hatchKind === 'circle') return x0 <= s.cx - s.r && s.cx + s.r <= x1 && y0 <= s.cy - s.r && s.cy + s.r <= y1;
@@ -3477,7 +3819,7 @@ function showContextMenu(x, y) {
   const items = ctxMenu.querySelectorAll('.ctx-item');
   for (const item of items) {
     const action = item.dataset.action;
-    const needsSelection = ['copy', 'delete', 'move', 'rotate', 'scale', 'mirror', 'offset'].includes(action);
+    const needsSelection = ['copy', 'delete', 'move', 'rotate', 'scale', 'mirror', 'offset', 'bring-front', 'bring-forward', 'send-backward', 'send-back'].includes(action);
     if (needsSelection && !hasSelection) {
       item.classList.add('disabled');
     } else {
@@ -3532,6 +3874,8 @@ ctxMenu?.addEventListener('click', (event) => {
     fitView();
   } else if (action === 'undo') {
     undo();
+  } else if (['bring-front', 'bring-forward', 'send-backward', 'send-back'].includes(action)) {
+    setDrawOrder(action);
   }
 });
 

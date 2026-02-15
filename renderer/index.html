@@ -511,6 +511,37 @@
       .custom-swatch span { pointer-events: none; position: relative; z-index: 1; font-size: 11px; }
 
       /* 矩形選択プレビュー */
+
+      .floating-dialog {
+        position: fixed;
+        z-index: 1100;
+        background: #1c222b;
+        border: 1px solid #4da6ff;
+        border-radius: 6px;
+        padding: 10px;
+        display: none;
+        min-width: 280px;
+      }
+      .floating-dialog .row { display:flex; gap:6px; align-items:center; margin-top:6px; }
+      .floating-dialog textarea,
+      .floating-dialog input,
+      .floating-dialog select {
+        width: 100%;
+        background: #0f141a;
+        border: 1px solid #3a4450;
+        color: #e8e8e8;
+        border-radius: 3px;
+        padding: 4px;
+      }
+      .floating-dialog button {
+        border: 1px solid #3f464d;
+        background: #1b2026;
+        color: #e8e8e8;
+        border-radius: 3px;
+        padding: 4px 8px;
+        cursor: pointer;
+      }
+
       #select-rect {
         position: absolute;
         border: 1px solid #4da6ff;
@@ -547,8 +578,35 @@
         <div class="ctx-item" data-action="mirror"><span>⇌</span>鏡像<span class="ctx-key">MI</span></div>
         <div class="ctx-item" data-action="offset"><span>∥</span>オフセット<span class="ctx-key">O</span></div>
         <div class="ctx-sep"></div>
+        <div class="ctx-item" data-action="bring-front"><span>⬆</span>最前面へ</div>
+        <div class="ctx-item" data-action="bring-forward"><span>↑</span>前面へ</div>
+        <div class="ctx-item" data-action="send-backward"><span>↓</span>背面へ</div>
+        <div class="ctx-item" data-action="send-back"><span>⬇</span>最背面へ</div>
+
+        <div class="ctx-sep"></div>
         <div class="ctx-item" data-action="fit"><span>⊡</span>全体表示<span class="ctx-key">ZA</span></div>
         <div class="ctx-item" data-action="undo"><span>↩</span>元に戻す<span class="ctx-key">Ctrl+Z</span></div>
+      </div>
+
+
+      <div id="mtext-editor" class="floating-dialog">
+        <div>MTEXTエディタ</div>
+        <textarea id="mtext-content" rows="6"></textarea>
+        <div class="row"><label>高さ(mm)</label><input id="mtext-height" type="number" value="3.5" step="0.5" style="max-width:90px;"/><button id="mtext-bold">B</button><button id="mtext-italic">I</button></div>
+        <div class="row"><button id="mtext-ok">OK</button><button id="mtext-cancel">キャンセル</button></div>
+      </div>
+
+      <div id="table-editor" class="floating-dialog">
+        <div>TABLEセル編集</div>
+        <div class="row"><input id="table-cell-input" type="text" /></div>
+        <div class="row"><button id="table-ok">OK</button><button id="table-cancel">キャンセル</button></div>
+      </div>
+
+      <div id="qselect-dialog" class="floating-dialog">
+        <div>クイック選択</div>
+        <div class="row"><select id="qs-type"><option value="">すべて</option><option value="line">線分</option><option value="circle">円</option><option value="rect">矩形</option><option value="text">文字</option><option value="mtext">MTEXT</option><option value="table">TABLE</option></select></div>
+        <div class="row"><select id="qs-layer"><option value="">すべてのレイヤー</option></select></div>
+        <div class="row"><button id="qs-apply">選択</button><button id="qs-cancel">キャンセル</button></div>
       </div>
 
       <!-- サイドバー -->

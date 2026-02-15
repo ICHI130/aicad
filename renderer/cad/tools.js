@@ -11,6 +11,8 @@ export const Tool = {
   ELLIPSE: 'ellipse',
   ARC: 'arc',
   POLYLINE: 'polyline',
+  MTEXT: 'mtext',
+  TABLE: 'table',
   DIM: 'dim',
   MOVE: 'move',
   COPY: 'copy',
@@ -303,6 +305,73 @@ export function buildShapeNode(shape, viewport, options = {}) {
     // スクリーンはY下向きなので、テキストをfontSize分上にオフセット
     node.offsetY(fontSize);
     return node;
+  }
+
+  if (shape.type === 'mtext') {
+    const p = mmToScreen({ x: shape.x, y: shape.y }, viewport);
+    const group = new Konva.Group({ id: shape.id, listening: !isPreview });
+    const lines = Array.isArray(shape.content) ? shape.content : [];
+    let offsetY = 0;
+    for (const line of lines) {
+      const text = String(line?.text || '');
+      const lineHeight = Number(line?.height) || shape.height || 3.5;
+      const fontSize = Math.max(8, lineHeight * viewport.scale);
+      const styleTokens = [];
+      if (line?.bold) styleTokens.push('bold');
+      if (line?.italic) styleTokens.push('italic');
+      group.add(new Konva.Text({
+        x: p.x,
+        y: p.y + offsetY,
+        text,
+        fontSize,
+        fill: color,
+        fontFamily: 'MS Gothic, IPAGothic, monospace',
+        fontStyle: styleTokens.join(' '),
+      }));
+      offsetY += fontSize * 1.4;
+    }
+    return group;
+  }
+
+  if (shape.type === 'table') {
+    const group = new Konva.Group({ id: shape.id, listening: !isPreview });
+    const origin = mmToScreen({ x: shape.x, y: shape.y }, viewport);
+    const cols = Math.max(1, Number(shape.cols) || 1);
+    const rows = Math.max(1, Number(shape.rows) || 1);
+    let y = origin.y;
+
+    for (let r = 0; r < rows; r += 1) {
+      let x = origin.x;
+      const rowMm = Number(shape.rowHeights?.[r]) || 10;
+      const rowH = rowMm * viewport.scale;
+      for (let c = 0; c < cols; c += 1) {
+        const colMm = Number(shape.colWidths?.[c]) || 30;
+        const colW = colMm * viewport.scale;
+        group.add(new Konva.Rect({
+          x,
+          y,
+          width: colW,
+          height: rowH,
+          stroke: color,
+          strokeWidth: sw,
+          fill: 'transparent',
+        }));
+        const cellText = String(shape.cells?.[r]?.[c] || '');
+        if (cellText) {
+          group.add(new Konva.Text({
+            x: x + 2,
+            y: y + 2,
+            text: cellText,
+            fontSize: Math.max(8, 2.5 * viewport.scale),
+            fill: color,
+            fontFamily: 'MS Gothic, IPAGothic, monospace',
+          }));
+        }
+        x += colW;
+      }
+      y += rowH;
+    }
+    return group;
   }
 
   if (shape.type === 'point') {
