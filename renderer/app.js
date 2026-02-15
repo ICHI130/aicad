@@ -217,6 +217,15 @@ try {
   rightClickMode = 'autocad_like';
 }
 
+function setRightClickMode(nextMode, notify = true) {
+  rightClickMode = nextMode === 'legacy_cancel' ? 'legacy_cancel' : 'autocad_like';
+  try { localStorage.setItem('cad.rightClickMode', rightClickMode); } catch {}
+  if (notify) {
+    const label = rightClickMode === 'autocad_like' ? 'Enter相当（AutoCAD互換）' : 'キャンセル優先（従来）';
+    cmdline.addHistory(`右クリックモード: ${label}`, '#8aa8c0');
+  }
+}
+
 // 矩形選択状態
 let boxSelectStart = null; // スクリーン座標
 let isBoxSelecting = false;
@@ -354,6 +363,15 @@ function restoreNamedView(name) {
 
 function listNamedViews() {
   return Object.keys(namedViews).sort((a, b) => a.localeCompare(b));
+}
+
+function initRightClickModeControls() {
+  const select = document.getElementById('right-click-mode');
+  if (!select) return;
+  select.value = rightClickMode;
+  select.addEventListener('change', () => {
+    setRightClickMode(select.value);
+  });
 }
 
 function normalizeLayerId(raw) {
@@ -801,6 +819,7 @@ cmdline.setActiveTool(tool);
 
 initDimStyleControls();
 loadPlotSettings();
+initRightClickModeControls();
 
 initSidebar({
   getDrawingContext() {
@@ -3167,9 +3186,10 @@ document.addEventListener('keydown', (event) => {
   }
   // F10: 右クリックモード切替
   if (key === 'F10') {
-    rightClickMode = rightClickMode === 'autocad_like' ? 'legacy_cancel' : 'autocad_like';
-    try { localStorage.setItem('cad.rightClickMode', rightClickMode); } catch {}
-    cmdline.addHistory(`右クリックモード: ${rightClickMode}`, '#8aa8c0');
+    const nextMode = rightClickMode === 'autocad_like' ? 'legacy_cancel' : 'autocad_like';
+    setRightClickMode(nextMode);
+    const select = document.getElementById('right-click-mode');
+    if (select) select.value = rightClickMode;
     return;
   }
 
